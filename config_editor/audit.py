@@ -13,7 +13,8 @@ data (so the UI can act on it) instead of printed.
   (a migration keeps it).
 
 A migration rebuilds the file on the template's layout: every template line is
-copied, the station's value replaces the template value where it differs,
+copied, the station's value replaces the template value where it differs, an
+option the station has commented out stays commented out (with its old value),
 known-but-not-in-template options are appended to their section, unknown ones
 are dropped and reported, and the legacy ``quota_management_disabled`` is folded
 into ``quota_management_enabled``.
@@ -191,8 +192,13 @@ def migrate(station: ConfigFile, template: ConfigFile, known: set[str] | None,
                     kept += 1
                     continue
             elif key in station.disabled:
-                log.append("[%s] %s: was commented out (%s) => template value %r now applies"
+                # The operator commented this option out on purpose: keep it that way (with
+                # the value they had), so RMS keeps using its built-in default. MigrateConfig
+                # would re-enable it with the template value here.
+                out.append("; " + ConfigFile._rewrite(line, station.disabled[key]))
+                log.append("[%s] %s: kept commented out (; %s); template has %r"
                            % (section, m.group(1), station.disabled[key], tval))
+                continue
             out.append(line)
             continue
         out.append(line)
