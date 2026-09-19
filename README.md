@@ -63,7 +63,7 @@ Then open <http://localhost:8421>. Pure stdlib, no dependencies.
 | `--host` | `127.0.0.1` | Use `0.0.0.0` to reach it from another machine on the LAN |
 | `--port` | `8421` | |
 | `--stations-dir` | `~/source/Stations` | One column per `<dir>/*/.config` |
-| `--rms-dir` | `~/source/RMS` | Its `.config` is used when there are no station folders; its `ConfigReader.py` gives the option types |
+| `--rms-dir` | `~/source/RMS` | Its `.config` is used when there are no station folders; its `.configTemplate` and `ConfigReader.py` drive the template column, audit and migration |
 | `--config PATH` | | Show an extra `.config` as its own column (repeatable) |
 
 ## Which files
@@ -92,6 +92,14 @@ Each row is tagged:
 
 Toggle **only varying** to get a diff of the whole machine at a glance.
 
+When RMS's `.configTemplate` exists (it is written by `RMS_Update.sh`), it is
+shown as a last, italic *template* column. Any cell that differs from the
+template value is dotted-underlined, **only ≠ template** filters down to those
+rows, and the editor drawer offers *use for every station* with the template
+value. Options that `ConfigReader.py` never reads are tagged **not in RMS**
+(RMS silently ignores them). A cell that is commented out in a file shows the
+old value after a `;`.
+
 Click a row to edit. The drawer shows the comment from the config as help, the
 type RMS will read the value as, and one input per station. Type a value into
 **value for every station** and *Apply to all* (or just press Enter there) to
@@ -110,6 +118,31 @@ If a file changes on disk while you have the page open (another editor, a
 migration), a banner appears; a save against a stale copy is refused and the
 values refreshed so nothing is clobbered.
 
+## Audit
+
+The **Audit** button runs the checks of RMS's `Utils/AuditConfig.py` for every
+station at once and makes each finding actionable:
+
+| Finding | Meaning | Action offered |
+| --- | --- | --- |
+| **Missing** | in `.configTemplate`, not in the file — RMS uses its built-in default | *add* (with the template value), *add all missing* per station or everywhere |
+| **Not implemented in RMS** | `ConfigReader.py` never reads it — a typo or a leftover, ignored by RMS | *comment out* |
+| **Commented out** | a `; option: value` line for an option RMS knows | *enable* (with its old value) |
+| **Not in the template** | RMS knows it but the template lacks it (an alpha feature, say); a migration keeps it | — |
+
+## Migrate
+
+The **Migrate** button does what `python -m Utils.MigrateConfig -u` does,
+per station and with a preview: each file is rebuilt on the template's layout
+(its comments, ordering and new options), every value you changed from the
+template default is carried over, options RMS knows but the template lacks are
+appended to their section under a marker comment, unknown options are dropped
+and listed, and the legacy `quota_management_disabled` is folded into
+`quota_management_enabled`. **Preview** shows the migration log and the exact
+unified diff for each selected station; **Apply** rewrites the selected files
+after a `.config.bak.<timestamp>` snapshot. A second migration of an
+up-to-date file is a no-op.
+
 ## Command line
 
 The same view and edits from a terminal or a script:
@@ -125,6 +158,14 @@ config-editor get MeteorDetection.k1   # k1 exists in two sections: say which
 
 `set` refuses a value that fails the type check unless `--force`, and takes a
 `.config.bak.<timestamp>` snapshot unless `--no-backup`.
+
+```bash
+config-editor audit                    # missing / unknown / commented-out / extra, per station
+config-editor migrate                  # dry run: what a migration would change
+config-editor migrate --diff           # ... with the unified diff per station
+config-editor migrate --apply          # rewrite every station on the template layout
+config-editor migrate --apply --stations US005A
+```
 
 ## Tests
 

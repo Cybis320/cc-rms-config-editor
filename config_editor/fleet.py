@@ -13,6 +13,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import audit as auditmod
 from .configfile import ConfigFile
 
 DEFAULT_STATIONS_DIR = Path.home() / "source" / "Stations"
@@ -98,21 +99,29 @@ class Fleet:
     targets: list[Target]
     files: dict[str, ConfigFile] = field(default_factory=dict)
     types: dict[str, str] = field(default_factory=dict)
+    known: set[str] | None = None          # every option ConfigReader.py reads
+    template_path: Path | None = None      # <rms_dir>/.configTemplate
+    template: ConfigFile | None = None
 
     @classmethod
     def load(cls, targets: list[Target], rms_dir: Path = DEFAULT_RMS_DIR) -> "Fleet":
-        fleet = cls(targets=targets, types=option_types(rms_dir))
+        fleet = cls(targets=targets, types=option_types(rms_dir),
+                    known=auditmod.known_options(rms_dir),
+                    template_path=auditmod.template_path(rms_dir))
         fleet.reload()
         return fleet
 
     def reload(self) -> None:
         self.files = {t.id: ConfigFile.load(t.path) for t in self.targets}
+        self.template = ConfigFile.load(self.template_path) if self.template_path else None
 
     def changed_on_disk(self) -> bool:
-        for t in self.targets:
-            cf = self.files.get(t.id)
+        watched = [(t.path, self.files.get(t.id)) for t in self.targets]
+        if self.template_path:
+            watched.append((self.template_path, self.template))
+        for path, cf in watched:
             try:
-                if cf is None or t.path.stat().st_mtime != cf.mtime:
+                if cf is None or path.stat().st_mtime != cf.mtime:
                     return True
             except OSError:
                 return True
@@ -125,8 +134,9 @@ class Fleet:
         order = [t.id for t in self.targets]
         sections: list[str] = []
         options: dict[str, list[tuple[str, str]]] = {}   # section -> [(key, spelling)]
-        for tid in order:
-            cf = self.files[tid]
+        # The template (when there is one) sets the canonical section and option order
+        sources = ([self.template] if self.template is not None else []) + [self.files[t] for t in order]
+        for cf in sources:
             for s in cf.sections:
                 if s not in sections:
                     sections.append(s)
@@ -147,6 +157,11 @@ class Fleet:
                     if e is not None and e.help and not help_text:
                         help_text = e.help
                 present = [v for v in values.values() if v is not None]
+                te = self.template.get(s, key) if self.template is not None else None
+                if te is not None and te.help and not help_text:
+                    help_text = te.help
+                disabled = {tid: self.files[tid].disabled[(s, key)] for tid in order
+                            if values[tid] is None and (s, key) in self.files[tid].disabled}
                 rows.append({
                     "name": spelling,
                     "key": key,
@@ -155,6 +170,9 @@ class Fleet:
                     "values": values,
                     "distinct": len(set(present)),
                     "missing": len(order) - len(present),
+                    "template": None if te is None else te.value,
+                    "known": None if self.known is None else (key in self.known),
+                    "disabled": disabled,
                 })
             out_sections.append({"name": s, "options": rows})
 
@@ -169,7 +187,56 @@ class Fleet:
                 "shared": t.shared,
                 "station_id": sid.value if sid else None,
             })
-        return {"files": files, "sections": out_sections}
+        return {
+            "files": files,
+            "sections": out_sections,
+            "template": None if self.template is None else str(self.template_path),
+            "rms_known": self.known is not None,
+        }
+
+    # --- audit / migrate -------------------------------------------------
+
+    def audit(self) -> dict:
+        """Per-target audit (see audit.audit) plus the template/ConfigReader status."""
+        return {
+            "template": None if self.template is None else str(self.template_path),
+            "rms_known": self.known is not None,
+            "stations": {t.id: auditmod.audit(self.files[t.id], self.template, self.known)
+                         for t in self.targets},
+        }
+
+    def migrate(self, ids: list[str], apply: bool = False,
+                backup_done: set[str] | None = None, backup: bool = True) -> dict:
+        """Rebuild the given targets on the template layout; write only with ``apply``.
+
+        Returns ``{id: {diff, log, changed, written, backup}}``.
+        """
+        if self.template is None:
+            raise ValueError("no .configTemplate found (run RMS_Update.sh, or pass --rms-dir)")
+        unknown = [tid for tid in ids if tid not in self.files]
+        if unknown:
+            raise KeyError("unknown target(s): %s" % ", ".join(unknown))
+        result = {}
+        for tid in ids:
+            cf = ConfigFile.load(self.files[tid].path)
+            new_lines, log = auditmod.migrate(cf, self.template, self.known)
+            # the trailer carries a timestamp; ignore it when deciding "changed"
+            changed = [l for l in cf.lines if not l.startswith("; Migrated to the")] != \
+                      [l for l in new_lines if not l.startswith("; Migrated to the")]
+            entry = {"diff": auditmod.unified_diff(cf.lines, new_lines, str(cf.path)),
+                     "log": log, "changed": changed, "written": False, "backup": None}
+            if apply and changed:
+                cf.lines = new_lines
+                cf._index()
+                do_backup = backup and (backup_done is None or tid not in backup_done)
+                bak = cf.save(backup=do_backup)
+                if backup_done is not None:
+                    backup_done.add(tid)
+                entry["written"] = True
+                entry["backup"] = None if bak is None else str(bak)
+                self.files[tid] = cf
+            result[tid] = entry
+        return result
 
     # --- editing ---------------------------------------------------------
 

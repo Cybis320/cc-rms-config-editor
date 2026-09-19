@@ -37,6 +37,12 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._send_page()
             elif path == "/api/state":
                 self._send_state()
+            elif path == "/api/audit":
+                with self.lock:
+                    if self.fleet.changed_on_disk():
+                        self.fleet.reload()
+                    payload = self.fleet.audit()
+                self._send_json(200, payload)
             else:
                 self._send_error(404, "not found")
         except BrokenPipeError:
@@ -53,6 +59,8 @@ class EditorHandler(BaseHTTPRequestHandler):
             body = self._read_json()
             if path == "/api/set":
                 self._set(body)
+            elif path == "/api/migrate":
+                self._migrate(body)
             else:
                 self._send_error(404, "not found")
         except BrokenPipeError:
@@ -76,6 +84,7 @@ class EditorHandler(BaseHTTPRequestHandler):
         target = STATIC_DIR / "index.html"
         with self.lock:
             payload = self._state_payload()
+            payload["audit"] = self.fleet.audit()   # so the Audit panel opens instantly
         # "</" must not appear inside the inline script; JSON allows the escape.
         blob = json.dumps(payload).replace("</", "<\\/")
         html = target.read_text(encoding="utf-8").replace(
@@ -108,6 +117,17 @@ class EditorHandler(BaseHTTPRequestHandler):
         payload["result"] = result
         payload["warnings"] = warnings
         self._send_json(409 if result["conflict"] else 200, payload)
+
+    def _migrate(self, body: dict) -> None:
+        ids = body.get("stations")
+        apply = bool(body.get("apply", False))
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+            raise ValueError("need a non-empty list of stations")
+        with self.lock:
+            result = self.fleet.migrate(ids, apply=apply, backup_done=self.backup_done)
+            payload = self._state_payload() if apply else {}
+        payload["result"] = result
+        self._send_json(200, payload)
 
     # --- plumbing --------------------------------------------------------
 

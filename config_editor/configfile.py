@@ -21,6 +21,9 @@ SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
 # RMS writes "option: value"; RawConfigParser also accepts "option = value".
 OPTION_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*([:=])(.*)$")
 COMMENT_RE = re.compile(r"^\s*[;#]")
+# A commented-out option ("; option: value"). Many ordinary comments also match
+# ("; Examples: BGR"), so callers only trust these for names they already know.
+DISABLED_RE = re.compile(r"^\s*[;#]\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$")
 INLINE_COMMENT = ";"  # what RMS.ConfigReader strips from values
 
 
@@ -40,6 +43,7 @@ class ConfigFile:
     mtime: float = 0.0
     sections: list[str] = field(default_factory=list)
     entries: dict[tuple[str, str], Entry] = field(default_factory=dict)
+    disabled: dict[tuple[str, str], str] = field(default_factory=dict)  # commented-out candidates
     newline: str = "\n"
 
     # --- reading ---------------------------------------------------------
@@ -60,6 +64,7 @@ class ConfigFile:
     def _index(self) -> None:
         self.sections = []
         self.entries = {}
+        self.disabled = {}
         section = None
         pending_help: list[str] = []
         for i, line in enumerate(self.lines):
@@ -75,6 +80,10 @@ class ConfigFile:
                 continue
             if COMMENT_RE.match(line):
                 pending_help.append(line.strip()[1:].strip())
+                m = DISABLED_RE.match(line)
+                if m and section is not None:
+                    key = (section, m.group(1).lower())
+                    self.disabled.setdefault(key, m.group(2).split(INLINE_COMMENT, 1)[0].strip())
                 continue
             m = OPTION_RE.match(line)
             if m and section is not None:

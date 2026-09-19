@@ -30,7 +30,7 @@
     background: var(--line2); color: var(--text); border: 1px solid var(--line);
     border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 13px;
   }
-  input[type=search] { width: 260px; }
+  input[type=search] { width: 240px; }
   input:focus { outline: none; border-color: var(--accent); }
   button {
     background: var(--line2); color: var(--text); border: 1px solid var(--line);
@@ -39,6 +39,7 @@
   button:hover { border-color: var(--accent); }
   button.primary { background: #1f6feb; border-color: #1f6feb; }
   button.primary:hover { background: #388bfd; }
+  button.small { font-size: 11px; padding: 3px 8px; }
   button:disabled { opacity: .5; cursor: default; }
   label.chip {
     display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted);
@@ -50,6 +51,7 @@
     background: var(--line2); border: 1px solid var(--line); border-radius: 4px;
     padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--muted);
   }
+  code, .mono { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; }
 
   #layout { flex: 1; display: flex; min-height: 0; }
   nav {
@@ -72,6 +74,7 @@
   }
   thead th .sub { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
   thead th .warnid { color: var(--warn); }
+  thead th.tpl { color: var(--muted); font-style: italic; font-weight: 500; }
   th.opt, td.opt { position: sticky; left: 0; z-index: 1; background: var(--bg); min-width: 220px; }
   thead th.opt { z-index: 3; background: var(--tile); }
   tr.sec td {
@@ -82,47 +85,71 @@
   tbody tr.row:hover td { background: var(--line2); }
   td { padding: 5px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; white-space: nowrap; }
   td.opt { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; }
-  td.opt .tag { font-size: 10px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle; font-family: inherit; }
+  .tag { font-size: 10px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; }
   .tag.same { color: var(--ok); border: 1px solid rgba(63,185,80,.45); }
   .tag.vary { color: var(--warn); border: 1px solid rgba(210,153,34,.6); }
   .tag.miss { color: var(--bad); border: 1px solid rgba(248,81,73,.5); }
+  .tag.unk { color: var(--bad); border: 1px solid var(--bad); }
   td.val { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   tr.same td.val { color: var(--muted); }
   tr.same td.val.first { color: var(--text); }
   tr.vary td.val { background: var(--vary-bg); }
   tr.vary td.val.maj { background: transparent; }
   td.val.missing { color: var(--bad); font-style: italic; background: var(--miss-bg); }
+  td.val.missing .dis { color: var(--muted); font-style: normal; margin-left: 6px; }
+  td.val.nt { text-decoration: underline dotted var(--warn); text-underline-offset: 3px; }
+  td.val.tpl { color: var(--muted); font-style: italic; background: transparent !important; text-decoration: none; }
   td.opt.vary { border-left: 3px solid var(--warn); padding-left: 7px; }
 
-  /* editor drawer */
-  #drawer {
-    position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); z-index: 10;
+  /* drawers */
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(600px, 100vw); z-index: 10;
     background: var(--tile); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.5);
     display: none; flex-direction: column;
   }
-  #drawer.open { display: flex; }
-  #dhead { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
-  #dhead code { font-size: 14px; }
-  #dbody { flex: 1; overflow: auto; padding: 14px 16px; }
+  .drawer.open { display: flex; }
+  .drawer .dhead { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  .drawer .dhead code { font-size: 14px; }
+  .drawer .dbody { flex: 1; overflow: auto; padding: 14px 16px; }
+  .drawer .dfoot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dmsg { font-size: 12px; color: var(--muted); }
+  .dmsg.bad { color: var(--bad); }
+  .dmsg.ok { color: var(--ok); }
   #dhelp {
     white-space: pre-wrap; color: var(--muted); font-size: 12.5px; background: var(--bg);
-    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; max-height: 32vh; overflow: auto;
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; max-height: 32vh; overflow: auto;
   }
+  .tplline { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
+  .tplline code { color: var(--text); }
   .setall { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
   .setall input { flex: 1; }
   .srow { display: grid; grid-template-columns: 90px 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
   .srow .id { font-weight: 600; font-size: 12.5px; }
-  .srow .id small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
   .srow input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 12.5px; }
   .srow input.changed { border-color: var(--warn); }
   .srow input.bad { border-color: var(--bad); }
   .srow input.unset { color: var(--muted); font-style: italic; }
   .srow .unsetbtn { font-size: 11px; padding: 4px 8px; }
   .srow .warn { grid-column: 2 / 4; font-size: 11.5px; color: var(--warn); }
-  #dfoot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
-  #dmsg { font-size: 12px; color: var(--muted); }
-  #dmsg.bad { color: var(--bad); }
-  #dmsg.ok { color: var(--ok); }
+
+  /* audit / migrate panel */
+  .st { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .st > .sth { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg); font-weight: 600; }
+  .st > .sth .meta { font-weight: 400; }
+  .st .grp { padding: 6px 12px 8px; border-top: 1px solid var(--line2); }
+  .st .grp h4 { margin: 4px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .st .grp h4.bad { color: var(--bad); } .st .grp h4.warn { color: var(--warn); }
+  .it { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 12.5px; }
+  .it code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .it .sec { color: var(--muted); font-size: 11px; min-width: 110px; }
+  .clean { color: var(--ok); font-size: 12.5px; padding: 8px 12px; }
+  pre.diff { font: 11.5px/1.35 ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 50vh; margin: 6px 0 0; white-space: pre; }
+  pre.diff .a { color: var(--ok); } pre.diff .d { color: var(--bad); } pre.diff .h { color: var(--accent); }
+  ul.log { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); max-height: 30vh; overflow: auto; }
+  ul.log li.drop { color: var(--bad); }
+  .note { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+  .note code { color: var(--text); }
+
   #banner {
     display: none; padding: 6px 16px; background: rgba(210,153,34,.15); border-bottom: 1px solid var(--warn); font-size: 12.5px;
   }
@@ -144,8 +171,11 @@
   <input type="search" id="q" placeholder="filter options or values…  ( / )" autocomplete="off">
   <label class="chip" id="chip-vary"><input type="checkbox" id="only-vary">only varying</label>
   <label class="chip" id="chip-miss"><input type="checkbox" id="only-miss">only missing somewhere</label>
+  <label class="chip" id="chip-nt" style="display:none"><input type="checkbox" id="only-nt">only ≠ template</label>
   <span class="spacer"></span>
   <span class="meta" id="status">loading…</span>
+  <button id="audit-btn">Audit</button>
+  <button id="migrate-btn">Migrate</button>
   <button id="reload">Reload</button>
 </header>
 <div id="banner">Config files changed on disk — <a href="#" id="banner-reload" style="color:var(--accent)">reload</a> to see the latest values.</div>
@@ -155,8 +185,9 @@
   <main id="main"></main>
 </div>
 
-<div id="drawer">
-  <div id="dhead">
+<!-- option editor -->
+<div id="drawer" class="drawer">
+  <div class="dhead">
     <div>
       <code id="dname"></code>
       <div class="meta" id="dsec"></div>
@@ -164,19 +195,34 @@
     <span class="spacer"></span>
     <button id="dclose">Close (Esc)</button>
   </div>
-  <div id="dbody">
+  <div class="dbody">
     <div id="dhelp"></div>
+    <div class="tplline" id="dtpl" style="display:none">
+      <span>template:</span> <code id="dtplv"></code>
+      <button class="small" id="dtpl-use">use for every station</button>
+    </div>
     <div class="setall">
       <input type="text" id="setall" placeholder="value for every station">
       <button id="setall-btn">Apply to all</button>
     </div>
     <div id="rows"></div>
   </div>
-  <div id="dfoot">
+  <div class="dfoot">
     <button class="primary" id="dsave">Save (Enter)</button>
     <button id="drevert">Revert</button>
-    <span id="dmsg"></span>
+    <span class="dmsg" id="dmsg"></span>
   </div>
+</div>
+
+<!-- audit / migrate -->
+<div id="panel" class="drawer">
+  <div class="dhead">
+    <div><strong id="ptitle"></strong><div class="meta" id="psub"></div></div>
+    <span class="spacer"></span>
+    <button id="pclose">Close (Esc)</button>
+  </div>
+  <div class="dbody" id="pbody"></div>
+  <div class="dfoot" id="pfoot"></div>
 </div>
 <div id="toast"></div>
 
@@ -186,11 +232,13 @@ const POLL_MS = 5000;
 let state = null;          // last /api/state payload
 let files = [];            // state.files
 let current = 'all';       // section name or 'all'
-let editing = null;        // {section, option, row}
+let editing = null;        // {section, option, key, type, row}
 let dirtyDrawer = false;
+let panelMode = null;      // 'audit' | 'migrate' | null
 
 const $ = (id) => document.getElementById(id);
 const nav = $('nav'), main = $('main');
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 // --- data -----------------------------------------------------------------
 
@@ -198,22 +246,26 @@ async function load(showStatus = true) {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
-    apply(await r.json());
-    if (showStatus) $('status').textContent = `${files.length} configs · loaded ${new Date().toLocaleTimeString()} · v${state.version}`;
+    applyState(await r.json());
+    if (showStatus) setStatus();
     $('banner').classList.remove('show');
   } catch (e) {
     $('status').textContent = 'server unreachable — ' + e.message;
   }
 }
 
-function apply(payload) {
+function setStatus() {
+  $('status').textContent = `${files.length} configs · loaded ${new Date().toLocaleTimeString()} · v${state.version}`;
+}
+
+function applyState(payload) {
   state = payload;
   files = payload.files;
+  $('chip-nt').style.display = state.template ? '' : 'none';
   render();
 }
 
-// Poll only the mtimes; the file list is tiny, so re-fetching state is fine too,
-// but never yank the table out from under an open editor.
+// Poll for changes on disk; never yank the table out from under an open editor.
 async function poll() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
@@ -221,9 +273,21 @@ async function poll() {
     const fresh = await r.json();
     const changed = fresh.files.some((f, i) => !files[i] || f.mtime !== files[i].mtime || f.path !== files[i].path);
     if (!changed) return;
-    if (editing) $('banner').classList.add('show');
-    else apply(fresh);
+    if (editing || panelMode) $('banner').classList.add('show');
+    else applyState(fresh);
   } catch (e) { /* keep the last view */ }
+}
+
+async function apiSet(section, option, values, expect) {
+  const r = await fetch('/api/set', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section, option, values, expect_mtimes: expect || {} }),
+  });
+  const payload = await r.json();
+  if (r.status === 409) { applyState(payload); const e = new Error('conflict'); e.conflict = payload.result.conflict; throw e; }
+  if (!r.ok) throw new Error(payload.error || r.statusText);
+  applyState(payload);
+  return payload;
 }
 
 // --- rendering ------------------------------------------------------------
@@ -242,6 +306,8 @@ function majority(row) {
   return n > 1 ? best : null;
 }
 
+const offTemplate = (row) => row.template !== null && files.some((f) => row.values[f.id] !== row.template);
+
 function matches(row, q) {
   if (!q) return true;
   if (row.name.toLowerCase().includes(q)) return true;
@@ -250,28 +316,26 @@ function matches(row, q) {
 
 function visibleRows(section) {
   const q = $('q').value.trim().toLowerCase();
-  const onlyVary = $('only-vary').checked, onlyMiss = $('only-miss').checked;
+  const onlyVary = $('only-vary').checked, onlyMiss = $('only-miss').checked, onlyNt = $('only-nt').checked;
   return section.options.filter((row) => {
     if (onlyVary && rowClass(row) === 'same') return false;
     if (onlyMiss && !row.missing) return false;
+    if (onlyNt && !offTemplate(row)) return false;
     return matches(row, q);
   });
 }
 
 function render() {
   if (!state) return;
-  $('chip-vary').classList.toggle('on', $('only-vary').checked);
-  $('chip-miss').classList.toggle('on', $('only-miss').checked);
+  for (const [chip, box] of [['chip-vary', 'only-vary'], ['chip-miss', 'only-miss'], ['chip-nt', 'only-nt']])
+    $(chip).classList.toggle('on', $(box).checked);
 
   // Sidebar
-  const filtering = $('q').value.trim() || $('only-vary').checked || $('only-miss').checked;
+  const filtering = $('q').value.trim() || $('only-vary').checked || $('only-miss').checked || $('only-nt').checked;
   const items = [{ name: 'all', label: 'All sections' }, ...state.sections.map((s) => ({ name: s.name, label: s.name, sec: s }))];
   nav.replaceChildren(...items.map((it) => {
-    const a = document.createElement('a');
-    a.className = it.name === current ? 'active' : '';
-    a.textContent = it.label;
-    const n = document.createElement('span');
-    n.className = 'n';
+    const a = el('a', it.name === current ? 'active' : '', it.label);
+    const n = el('span', 'n');
     if (it.sec) {
       const vary = it.sec.options.filter((r) => rowClass(r) !== 'same').length;
       n.textContent = vary ? `${vary} ≠` : `${it.sec.options.length}`;
@@ -286,85 +350,102 @@ function render() {
 
   // Table
   const sections = current === 'all' ? state.sections : state.sections.filter((s) => s.name === current);
-  const table = document.createElement('table');
-  const thead = document.createElement('thead');
-  const hr = document.createElement('tr');
-  const th0 = document.createElement('th'); th0.className = 'opt'; th0.textContent = 'option';
-  hr.append(th0);
+  const hasTpl = !!state.template;
+  const ncols = files.length + 1 + (hasTpl ? 1 : 0);
+  const table = el('table');
+  const thead = el('thead');
+  const hr = el('tr');
+  hr.append(el('th', 'opt', 'option'));
   for (const f of files) {
-    const th = document.createElement('th');
-    th.textContent = f.id;
+    const th = el('th', '', f.id);
     th.title = `${f.path}\nmodified ${new Date(f.mtime * 1000).toLocaleString()}`;
-    const sub = document.createElement('span'); sub.className = 'sub';
+    const sub = el('span', 'sub');
     if (f.shared) sub.textContent = 'shared base';
     else if (f.station_id && f.station_id !== f.id) { sub.textContent = `stationID: ${f.station_id}`; sub.classList.add('warnid'); }
-    else sub.textContent = f.station_id ? '' : 'no stationID';
+    else if (!f.station_id) sub.textContent = 'no stationID';
     if (sub.textContent) th.append(sub);
+    hr.append(th);
+  }
+  if (hasTpl) {
+    const th = el('th', 'tpl', 'template');
+    th.title = state.template;
+    th.append(el('span', 'sub', '.configTemplate (reference)'));
     hr.append(th);
   }
   thead.append(hr);
   table.append(thead);
 
-  const tbody = document.createElement('tbody');
+  const tbody = el('tbody');
   let shown = 0;
   for (const sec of sections) {
     const rows = visibleRows(sec);
     if (!rows.length) continue;
     if (current === 'all' || filtering) {
-      const tr = document.createElement('tr'); tr.className = 'sec';
-      const td = document.createElement('td'); td.colSpan = files.length + 1; td.textContent = `[${sec.name}]`;
+      const tr = el('tr', 'sec');
+      const td = el('td', '', `[${sec.name}]`); td.colSpan = ncols;
       tr.append(td); tbody.append(tr);
     }
     for (const row of rows) {
       shown++;
       const cls = rowClass(row);
-      const tr = document.createElement('tr'); tr.className = 'row ' + cls;
-      const td0 = document.createElement('td'); td0.className = 'opt' + (cls !== 'same' ? ' vary' : '');
-      td0.textContent = row.name;
-      const tag = document.createElement('span');
-      tag.className = 'tag ' + cls;
+      const tr = el('tr', 'row ' + cls);
+      const td0 = el('td', 'opt' + (cls !== 'same' ? ' vary' : ''), row.name);
+      const tag = el('span', 'tag ' + cls);
       tag.textContent = cls === 'same' ? 'same' : cls === 'missing' ? 'unset' : (row.missing ? `${row.missing} missing` : `${row.distinct} values`);
       td0.append(tag);
+      if (row.known === false) { const t = el('span', 'tag unk', 'not in RMS'); t.title = 'ConfigReader.py never reads this option — RMS ignores it'; td0.append(t); }
       if (row.help) td0.title = row.help;
       tr.append(td0);
       const maj = majority(row);
       files.forEach((f, i) => {
-        const td = document.createElement('td');
+        const td = el('td', 'val' + (i === 0 ? ' first' : ''));
         const v = row.values[f.id];
-        td.className = 'val' + (i === 0 ? ' first' : '');
-        if (v === null) { td.classList.add('missing'); td.textContent = '—'; td.title = 'not set — RMS default applies'; }
-        else { td.textContent = v; td.title = v; if (cls === 'vary' && v === maj) td.classList.add('maj'); }
+        if (v === null) {
+          td.classList.add('missing'); td.textContent = '—';
+          td.title = 'not set — RMS default applies';
+          const dis = row.disabled && row.disabled[f.id];
+          if (dis !== undefined) { td.append(el('span', 'dis', `; ${dis}`)); td.title = `commented out (was ${dis}) — RMS default applies`; }
+        } else {
+          td.textContent = v; td.title = v;
+          if (cls === 'vary' && v === maj) td.classList.add('maj');
+        }
+        if (row.template !== null && v !== row.template) { td.classList.add('nt'); td.title += `\ntemplate: ${row.template || '(empty)'}`; }
         tr.append(td);
       });
+      if (hasTpl) {
+        const td = el('td', 'val tpl', row.template === null ? '' : (row.template || '(empty)'));
+        td.title = row.template === null ? 'not in the template' : 'template value';
+        tr.append(td);
+      }
       tr.onclick = () => openEditor(sec.name, row);
       tbody.append(tr);
     }
   }
   table.append(tbody);
-  if (!shown) {
-    const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'nothing matches';
-    main.replaceChildren(d);
-  } else main.replaceChildren(table);
+  if (!shown) main.replaceChildren(el('div', 'empty', 'nothing matches'));
+  else main.replaceChildren(table);
 }
 
-// --- editor drawer --------------------------------------------------------
+// --- option editor --------------------------------------------------------
 
 const drawer = $('drawer');
 
 function openEditor(section, row) {
+  closePanel();
   editing = { section, option: row.name, key: row.key, type: row.type, row };
   dirtyDrawer = false;
   $('dname').textContent = row.name;
-  $('dsec').textContent = `[${section}] · ${row.type}`;
-  $('dhelp').textContent = row.help || '(no comment in the config)';
+  $('dsec').textContent = `[${section}] · ${row.type}` + (row.known === false ? ' · not read by RMS' : '');
+  $('dhelp').textContent = row.help || '';
   $('dhelp').style.display = row.help ? '' : 'none';
+  $('dtpl').style.display = row.template === null ? 'none' : '';
+  $('dtplv').textContent = row.template === null ? '' : (row.template || '(empty)');
   $('setall').value = '';
-  $('dmsg').textContent = ''; $('dmsg').className = '';
+  $('dmsg').textContent = ''; $('dmsg').className = 'dmsg';
   $('rows').replaceChildren(...files.map((f) => {
     const v = row.values[f.id];
-    const div = document.createElement('div'); div.className = 'srow'; div.dataset.id = f.id;
-    const id = document.createElement('span'); id.className = 'id'; id.textContent = f.id;
-    const inp = document.createElement('input'); inp.type = 'text';
+    const div = el('div', 'srow'); div.dataset.id = f.id;
+    const inp = el('input'); inp.type = 'text';
     inp.dataset.orig = v === null ? '\0' : v;
     inp.dataset.unset = v === null ? '1' : '';
     inp.value = v === null ? '' : v;
@@ -372,11 +453,10 @@ function openEditor(section, row) {
     if (v === null) inp.classList.add('unset');
     inp.oninput = () => { inp.dataset.unset = ''; inp.classList.remove('unset'); inp.placeholder = ''; refreshRow(div); };
     inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } };
-    const b = document.createElement('button'); b.className = 'unsetbtn'; b.textContent = 'unset';
+    const b = el('button', 'unsetbtn', 'unset');
     b.title = 'comment the option out so RMS uses its built-in default';
     b.onclick = () => { inp.value = ''; inp.dataset.unset = '1'; inp.classList.add('unset'); inp.placeholder = '(unset — RMS default)'; refreshRow(div); };
-    const w = document.createElement('div'); w.className = 'warn';
-    div.append(id, inp, b, w);
+    div.append(el('span', 'id', f.id), inp, b, el('div', 'warn'));
     return div;
   }));
   drawer.classList.add('open');
@@ -392,7 +472,7 @@ function closeEditor() {
 
 function typeWarning(v, type) {
   if (type === 'int' && !/^[+-]?\d+$/.test(v.trim())) return `RMS reads this as an int`;
-  if (type === 'float' && isNaN(Number(v.trim())) ) return `RMS reads this as a float`;
+  if (type === 'float' && isNaN(Number(v.trim()))) return `RMS reads this as a float`;
   if (type === 'bool' && !/^(1|0|yes|no|true|false|on|off)$/i.test(v.trim())) return `RMS reads this as a bool (true/false)`;
   if (v.includes(';')) return `';' starts a comment in RMS configs`;
   return '';
@@ -409,17 +489,16 @@ function refreshRow(div) {
   dirtyDrawer = [...$('rows').querySelectorAll('input')].some((i) => i.classList.contains('changed'));
 }
 
-$('setall-btn').onclick = applyAll;
-$('setall').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); applyAll(); save(); } };
-function applyAll() {
-  const v = $('setall').value;
+function applyAll(v) {
   for (const div of $('rows').children) {
     const inp = div.querySelector('input');
     inp.value = v; inp.dataset.unset = ''; inp.classList.remove('unset'); inp.placeholder = '';
     refreshRow(div);
   }
 }
-
+$('setall-btn').onclick = () => applyAll($('setall').value);
+$('setall').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); applyAll($('setall').value); save(); } };
+$('dtpl-use').onclick = () => { $('setall').value = editing.row.template; applyAll(editing.row.template); };
 $('drevert').onclick = () => openEditor(editing.section, editing.row);
 $('dclose').onclick = closeEditor;
 $('dsave').onclick = save;
@@ -436,27 +515,19 @@ async function save() {
   for (const f of files) expect[f.id] = f.mtime;
   $('dsave').disabled = true;
   setMsg('saving…', '');
+  const ed = editing;
   try {
-    const r = await fetch('/api/set', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section: editing.section, option: editing.option, values, expect_mtimes: expect }),
-    });
-    const payload = await r.json();
-    if (r.status === 409) {
-      apply(payload);
-      setMsg(`${payload.result.conflict.join(', ')} changed on disk since you loaded — values refreshed, nothing written. Edit again.`, 'bad');
-      const row = findRow(editing.section, editing.key);
-      if (row) openEditor(editing.section, row);
-      return;
-    }
-    if (!r.ok) throw new Error(payload.error || r.statusText);
-    apply(payload);
+    const payload = await apiSet(ed.section, ed.option, values, expect);
     const w = payload.result.written;
     const baks = Object.keys(payload.result.backups || {});
-    toast(w.length ? `Saved ${editing.option} → ${w.join(', ')}${baks.length ? ' · backups made' : ''}` : 'no change written');
+    toast(w.length ? `Saved ${ed.option} → ${w.join(', ')}${baks.length ? ' · backups made' : ''}` : 'no change written');
     closeEditor();
   } catch (e) {
-    setMsg('save failed: ' + e.message, 'bad');
+    if (e.conflict) {
+      setMsg(`${e.conflict.join(', ')} changed on disk since you loaded — values refreshed, nothing written. Edit again.`, 'bad');
+      const row = findRow(ed.section, ed.key);
+      if (row) openEditor(ed.section, row);
+    } else setMsg('save failed: ' + e.message, 'bad');
   } finally {
     $('dsave').disabled = false;
   }
@@ -467,7 +538,7 @@ function findRow(section, key) {
   return sec && sec.options.find((r) => r.key === key);
 }
 
-function setMsg(text, cls) { $('dmsg').textContent = text; $('dmsg').className = cls; }
+function setMsg(text, cls) { $('dmsg').textContent = text; $('dmsg').className = 'dmsg ' + cls; }
 
 let toastTimer = null;
 function toast(text) {
@@ -475,33 +546,245 @@ function toast(text) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+// --- audit / migrate panel ------------------------------------------------
+
+const panel = $('panel');
+
+function openPanel(mode) {
+  if (editing) closeEditor();
+  panelMode = mode;
+  panel.classList.add('open');
+  if (mode === 'audit') renderAudit(); else renderMigrate();
+}
+function closePanel() {
+  if (!panelMode) return;
+  panelMode = null;
+  panel.classList.remove('open');
+  if ($('banner').classList.contains('show')) load();
+}
+$('pclose').onclick = closePanel;
+$('audit-btn').onclick = () => openPanel('audit');
+$('migrate-btn').onclick = () => openPanel('migrate');
+
+function pmsg(text, cls) {
+  let m = $('pfoot').querySelector('.dmsg');
+  if (!m) { m = el('span', 'dmsg'); $('pfoot').append(m); }
+  m.textContent = text; m.className = 'dmsg ' + (cls || '');
+}
+
+async function renderAudit(refetch = false) {
+  $('ptitle').textContent = 'Audit';
+  $('psub').textContent = 'each station vs. .configTemplate and ConfigReader.py';
+  let rep = !refetch && state && state.audit;   // embedded at page load; refetched after edits
+  if (!rep) {
+    $('pbody').replaceChildren(el('div', 'note', 'loading…'));
+    $('pfoot').replaceChildren();
+    try {
+      const r = await fetch('/api/audit', { cache: 'no-store' });
+      rep = await r.json();
+      if (!r.ok) throw new Error(rep.error || r.statusText);
+      if (state) state.audit = rep;
+    } catch (e) { $('pbody').replaceChildren(el('div', 'note', 'audit failed: ' + e.message)); return; }
+    if (panelMode !== 'audit') return;
+  }
+
+  const body = [];
+  const note = el('p', 'note');
+  note.append('Template: ');
+  note.append(rep.template ? el('code', '', rep.template) : el('span', '', 'not found — missing-option checks skipped (run RMS_Update.sh to create it)'));
+  note.append(' · ConfigReader.py: ' + (rep.rms_known ? 'found' : 'not found — unknown-option checks skipped'));
+  body.push(note);
+
+  const groups = [
+    ['missing', 'Missing — in the template, not in the file (RMS default applies)', 'warn'],
+    ['unknown', 'Not implemented in RMS — ignored', 'bad'],
+    ['disabled', 'Commented out — RMS default applies', ''],
+    ['extra', 'Not in the template — RMS knows it, a migration keeps it', ''],
+  ];
+  let totalMissing = 0;
+  for (const f of files) {
+    const a = rep.stations[f.id];
+    if (!a) continue;
+    const box = el('div', 'st');
+    const head = el('div', 'sth', f.id);
+    const counts = groups.map(([k]) => a[k].length);
+    head.append(el('span', 'meta', counts.some(Boolean) ? `${a.missing.length} missing · ${a.unknown.length} unknown · ${a.disabled.length} commented · ${a.extra.length} extra` : ''));
+    head.append(el('span', 'spacer'));
+    if (a.missing.length) {
+      const b = el('button', 'small', 'add all missing');
+      b.title = 'add every missing option to this file with the template value';
+      b.onclick = () => auditAct(a.missing.map((d) => [d.section, d.name, { [f.id]: d.template_value }]), `added ${a.missing.length} option(s) to ${f.id}`);
+      head.append(b);
+      totalMissing += a.missing.length;
+    }
+    box.append(head);
+    if (!counts.some(Boolean)) box.append(el('div', 'clean', 'clean — nothing to report'));
+    groups.forEach(([k, label, cls]) => {
+      if (!a[k].length) return;
+      const g = el('div', 'grp');
+      g.append(el('h4', cls, label));
+      for (const d of a[k]) {
+        const it = el('div', 'it');
+        it.append(el('span', 'sec', `[${d.section}]`));
+        const v = k === 'missing' ? d.template_value : d.value;
+        const c = el('code', '', d.name + (v === undefined ? '' : `: ${v}`));
+        c.title = (d.help || '') + (k === 'missing' ? `\ntemplate value: ${v}` : '');
+        it.append(c);
+        let b = null;
+        if (k === 'missing') { b = el('button', 'small', 'add'); b.onclick = () => auditAct([[d.section, d.name, { [f.id]: d.template_value }]], `added ${d.name} to ${f.id}`); }
+        else if (k === 'unknown') { b = el('button', 'small', 'comment out'); b.onclick = () => auditAct([[d.section, d.name, { [f.id]: null }]], `commented ${d.name} out in ${f.id}`); }
+        else if (k === 'disabled') { b = el('button', 'small', 'enable'); b.title = `re-enable with its old value ${d.value}`; b.onclick = () => auditAct([[d.section, d.name, { [f.id]: d.value }]], `enabled ${d.name} in ${f.id}`); }
+        if (b) it.append(b);
+        g.append(it);
+      }
+      box.append(g);
+    });
+    body.push(box);
+  }
+  $('pbody').replaceChildren(...body);
+  const foot = [];
+  if (totalMissing) {
+    const b = el('button', 'primary', `Add all missing everywhere (${totalMissing})`);
+    b.onclick = () => {
+      const ops = [];
+      for (const f of files) for (const d of (rep.stations[f.id] || { missing: [] }).missing) ops.push([d.section, d.name, { [f.id]: d.template_value }]);
+      auditAct(ops, `added ${ops.length} option(s) across ${files.length} files`);
+    };
+    foot.push(b);
+  }
+  const rb = el('button', '', 'Re-run');
+  rb.onclick = () => renderAudit(true);
+  foot.push(rb);
+  $('pfoot').replaceChildren(...foot);
+}
+
+// ops: [[section, option, {id: value|null}], ...] — merged per option so one file write each
+async function auditAct(ops, done) {
+  const merged = new Map();
+  for (const [sec, opt, vals] of ops) {
+    const k = sec + '\0' + opt;
+    if (!merged.has(k)) merged.set(k, [sec, opt, {}]);
+    Object.assign(merged.get(k)[2], vals);
+  }
+  pmsg('writing…', '');
+  try {
+    for (const [sec, opt, vals] of merged.values()) await apiSet(sec, opt, vals);
+    toast(done);
+    renderAudit(true);
+  } catch (e) {
+    pmsg('failed: ' + (e.conflict ? 'file changed on disk, reloaded — try again' : e.message), 'bad');
+  }
+}
+
+function renderMigrate() {
+  $('ptitle').textContent = 'Migrate to the template layout';
+  $('psub').textContent = 'rebuild each file on .configTemplate, carrying your values over';
+  const body = [];
+  if (!state.template) {
+    body.push(el('div', 'note', 'No .configTemplate found next to RMS — run RMS_Update.sh to create it, or start the editor with --rms-dir.'));
+    $('pbody').replaceChildren(...body); $('pfoot').replaceChildren(); return;
+  }
+  const note = el('p', 'note');
+  note.append('Like ');
+  note.append(el('code', '', 'python -m Utils.MigrateConfig'));
+  note.append(': the template supplies layout, comments and new options; every value you changed from the template default is kept; options RMS knows but the template lacks are preserved at the end of their section; options RMS does not read are dropped. Preview shows the exact diff before anything is written; each file is snapshotted as ');
+  note.append(el('code', '', '.config.bak.<timestamp>'));
+  note.append(' first.');
+  body.push(note);
+  const list = el('div');
+  for (const f of files) {
+    const box = el('div', 'st'); box.dataset.id = f.id;
+    const head = el('div', 'sth');
+    const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = !f.shared; cb.className = 'sel';
+    lab.append(cb, ' ' + f.id);
+    head.append(lab, el('span', 'meta result', ''), el('span', 'spacer'));
+    const det = el('div', 'grp detail'); det.style.display = 'none';
+    box.append(head, det);
+    list.append(box);
+  }
+  body.push(list);
+  $('pbody').replaceChildren(...body);
+  const prev = el('button', '', 'Preview');
+  prev.onclick = () => runMigrate(false);
+  const app = el('button', 'primary', 'Apply to selected');
+  app.onclick = () => runMigrate(true);
+  $('pfoot').replaceChildren(prev, app);
+}
+
+function selectedStations() {
+  return [...$('pbody').querySelectorAll('.st')].filter((b) => b.querySelector('.sel').checked).map((b) => b.dataset.id);
+}
+
+async function runMigrate(write) {
+  const ids = selectedStations();
+  if (!ids.length) { pmsg('select at least one station', 'bad'); return; }
+  if (write && !confirm(`Rewrite ${ids.join(', ')} on the template layout?\nEach file is backed up first.`)) return;
+  pmsg(write ? 'migrating…' : 'previewing…', '');
+  for (const b of $('pfoot').querySelectorAll('button')) b.disabled = true;
+  try {
+    const r = await fetch('/api/migrate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stations: ids, apply: write }),
+    });
+    const payload = await r.json();
+    if (!r.ok) throw new Error(payload.error || r.statusText);
+    if (write) { applyState(payload); state.audit = null; }
+    for (const [id, res] of Object.entries(payload.result)) {
+      const box = $('pbody').querySelector(`.st[data-id="${id}"]`);
+      if (!box) continue;
+      box.querySelector('.result').textContent = res.written ? `written${res.backup ? ' · backup made' : ''}`
+        : res.changed ? 'would change' : 'already matches the template';
+      const det = box.querySelector('.detail');
+      det.replaceChildren();
+      det.style.display = '';
+      const ul = el('ul', 'log');
+      for (const l of res.log) ul.append(el('li', /DROPPED/.test(l) ? 'drop' : '', l));
+      det.append(ul);
+      if (res.changed && !res.written) {
+        const pre = el('pre', 'diff');
+        for (const line of res.diff.split('\n')) {
+          pre.append(el('span', line.startsWith('+') ? 'a' : line.startsWith('-') ? 'd' : line.startsWith('@@') ? 'h' : '', line + '\n'));
+        }
+        det.append(pre);
+      }
+    }
+    const written = Object.values(payload.result).filter((r) => r.written).length;
+    pmsg(write ? `${written} file(s) rewritten` : 'preview only — nothing written', write ? 'ok' : '');
+    if (write) toast(`Migrated ${written} config(s)`);
+  } catch (e) {
+    pmsg('failed: ' + e.message, 'bad');
+  } finally {
+    for (const b of $('pfoot').querySelectorAll('button')) b.disabled = false;
+  }
+}
+
 // --- wiring ----------------------------------------------------------------
 
 $('q').oninput = render;
 $('only-vary').onchange = render;
 $('only-miss').onchange = render;
+$('only-nt').onchange = render;
 $('reload').onclick = () => load();
-$('banner-reload').onclick = (e) => { e.preventDefault(); if (editing) closeEditor(); load(); };
+$('banner-reload').onclick = (e) => { e.preventDefault(); if (editing) closeEditor(); if (panelMode) closePanel(); load(); };
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && editing) { closeEditor(); return; }
-  if (e.key === '/' && !editing && document.activeElement !== $('q')) { e.preventDefault(); $('q').focus(); }
+  if (e.key === 'Escape') { if (editing) closeEditor(); else if (panelMode) closePanel(); return; }
+  if (e.key === '/' && !editing && !panelMode && document.activeElement !== $('q')) { e.preventDefault(); $('q').focus(); }
 });
 window.addEventListener('beforeunload', (e) => { if (dirtyDrawer) { e.preventDefault(); e.returnValue = ''; } });
 
-// Deep links: #section=Capture  #edit=System.elevation  #vary=1
+// Deep links: #section=Capture  #edit=System.elevation  #vary=1  #nt=1  #panel=audit|migrate
 const hash = new URLSearchParams(location.hash.slice(1));
 current = hash.get('section') || localStorage.getItem('cfg.section') || 'all';
 if (hash.get('vary')) $('only-vary').checked = true;
-if (INITIAL_STATE) {
-  apply(INITIAL_STATE);
-  $('status').textContent = `${files.length} configs · loaded ${new Date().toLocaleTimeString()} · v${state.version}`;
-} else load();
+if (hash.get('nt')) $('only-nt').checked = true;
+if (INITIAL_STATE) { applyState(INITIAL_STATE); setStatus(); } else load();
 if (hash.get('edit') && state) {
   const [sec, key] = hash.get('edit').split('.');
   const row = findRow(sec, (key || '').toLowerCase());
   if (row) openEditor(sec, row);
 }
+if (hash.get('panel') && state) openPanel(hash.get('panel') === 'migrate' ? 'migrate' : 'audit');
 setInterval(poll, POLL_MS);
 </script>
 </body>

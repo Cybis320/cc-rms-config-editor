@@ -94,6 +94,47 @@ def cmd_set(args: argparse.Namespace) -> None:
         print("%-10s %s%s" % (i, state, ("  (backup: %s)" % bak) if bak else ""))
 
 
+def cmd_audit(args: argparse.Namespace) -> None:
+    fleet = _load(args)
+    rep = fleet.audit()
+    print("template:     %s" % (rep["template"] or "NOT FOUND (missing-option checks skipped)"))
+    print("ConfigReader: %s" % ("found" if rep["rms_known"] else "NOT FOUND (unknown-option checks skipped)"))
+    labels = [("missing", "MISSING (in the template, not in the file; RMS default applies)"),
+              ("unknown", "NOT IMPLEMENTED IN RMS (ignored by RMS)"),
+              ("disabled", "COMMENTED OUT (RMS default applies)"),
+              ("extra", "NOT IN THE TEMPLATE (known to RMS; a migration keeps them)")]
+    for tid, a in rep["stations"].items():
+        print()
+        print("== %s" % tid)
+        if not any(a[k] for k, _ in labels):
+            print("   clean")
+        for k, label in labels:
+            if not a[k]:
+                continue
+            print("   %s" % label)
+            for d in a[k]:
+                v = d.get("template_value", d.get("value"))
+                print("     [%s] %s%s" % (d["section"], d["name"], "" if v is None else ": " + v))
+
+
+def cmd_migrate(args: argparse.Namespace) -> None:
+    fleet = _load(args)
+    ids = [t.id for t in fleet.targets if not t.shared] if not args.stations else \
+        [s.strip() for s in args.stations.split(",") if s.strip()]
+    result = fleet.migrate(ids, apply=args.apply, backup=not args.no_backup)
+    for tid, r in result.items():
+        print("== %s: %s" % (tid, "written" if r["written"] else
+                             "would change" if r["changed"] else "already matches the template"))
+        for line in r["log"]:
+            print("   " + line)
+        if r["backup"]:
+            print("   backup: %s" % r["backup"])
+        if args.diff and r["changed"]:
+            print(r["diff"])
+    if not args.apply and any(r["changed"] for r in result.values()):
+        print("\nDry run. Re-run with --apply to write (add --diff to see the exact changes).")
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import serve
     serve(_load(args), args.host, args.port)
@@ -131,6 +172,18 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--force", action="store_true", help="write even if the value fails the type check")
     p.add_argument("--no-backup", action="store_true", help="skip the .config.bak.<timestamp> snapshot")
     p.set_defaults(func=cmd_set)
+
+    p = sub.add_parser("audit", help="compare every station with .configTemplate and ConfigReader.py")
+    _add_location_args(p)
+    p.set_defaults(func=cmd_audit)
+
+    p = sub.add_parser("migrate", help="rebuild station configs on the .configTemplate layout, keeping custom values")
+    _add_location_args(p)
+    p.add_argument("--stations", help="comma-separated station ids (default: all)")
+    p.add_argument("--apply", action="store_true", help="write the files (default: dry run)")
+    p.add_argument("--diff", action="store_true", help="print the unified diff per station")
+    p.add_argument("--no-backup", action="store_true", help="skip the .config.bak.<timestamp> snapshot")
+    p.set_defaults(func=cmd_migrate)
 
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0].startswith("-"):
