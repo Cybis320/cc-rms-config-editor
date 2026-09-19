@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RMS Config Editor</title>
+<style>
+  :root {
+    --bg: #0d1117; --tile: #161b22; --line: #30363d; --line2: #21262d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --same-bg: rgba(63,185,80,.06); --vary-bg: rgba(210,153,34,.10); --miss-bg: rgba(248,81,73,.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 16px; border-bottom: 1px solid var(--line); flex: none;
+  }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 8px 0 0; letter-spacing: .02em; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  input[type=search], input[type=text] {
+    background: var(--line2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 13px;
+  }
+  input[type=search] { width: 260px; }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--line2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.primary:hover { background: #388bfd; }
+  button:disabled { opacity: .5; cursor: default; }
+  label.chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; cursor: pointer; user-select: none;
+  }
+  label.chip input { margin: 0; }
+  label.chip.on { color: var(--text); border-color: var(--accent); }
+  kbd {
+    background: var(--line2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 5px; font: 11px ui-monospace, monospace; color: var(--muted);
+  }
+
+  #layout { flex: 1; display: flex; min-height: 0; }
+  nav {
+    width: 210px; flex: none; border-right: 1px solid var(--line); overflow: auto; padding: 8px 0;
+  }
+  nav a {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px; color: var(--text);
+    text-decoration: none; font-size: 13px; cursor: pointer;
+  }
+  nav a:hover { background: var(--line2); }
+  nav a.active { background: var(--line2); border-left: 3px solid var(--accent); padding-left: 11px; }
+  nav a .n { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  nav a .n.vary { color: var(--warn); }
+
+  main { flex: 1; overflow: auto; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; z-index: 2; background: var(--tile); border-bottom: 1px solid var(--line);
+    text-align: left; padding: 8px 10px; font-weight: 600; white-space: nowrap;
+  }
+  thead th .sub { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+  thead th .warnid { color: var(--warn); }
+  th.opt, td.opt { position: sticky; left: 0; z-index: 1; background: var(--bg); min-width: 220px; }
+  thead th.opt { z-index: 3; background: var(--tile); }
+  tr.sec td {
+    background: var(--tile); color: var(--text); font-weight: 600; padding: 10px 10px 6px;
+    border-bottom: 1px solid var(--line); position: sticky; left: 0;
+  }
+  tbody tr.row { cursor: pointer; }
+  tbody tr.row:hover td { background: var(--line2); }
+  td { padding: 5px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; white-space: nowrap; }
+  td.opt { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; }
+  td.opt .tag { font-size: 10px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle; font-family: inherit; }
+  .tag.same { color: var(--ok); border: 1px solid rgba(63,185,80,.45); }
+  .tag.vary { color: var(--warn); border: 1px solid rgba(210,153,34,.6); }
+  .tag.miss { color: var(--bad); border: 1px solid rgba(248,81,73,.5); }
+  td.val { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  tr.same td.val { color: var(--muted); }
+  tr.same td.val.first { color: var(--text); }
+  tr.vary td.val { background: var(--vary-bg); }
+  tr.vary td.val.maj { background: transparent; }
+  td.val.missing { color: var(--bad); font-style: italic; background: var(--miss-bg); }
+  td.opt.vary { border-left: 3px solid var(--warn); padding-left: 7px; }
+
+  /* editor drawer */
+  #drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); z-index: 10;
+    background: var(--tile); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.5);
+    display: none; flex-direction: column;
+  }
+  #drawer.open { display: flex; }
+  #dhead { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+  #dhead code { font-size: 14px; }
+  #dbody { flex: 1; overflow: auto; padding: 14px 16px; }
+  #dhelp {
+    white-space: pre-wrap; color: var(--muted); font-size: 12.5px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px; max-height: 32vh; overflow: auto;
+  }
+  .setall { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .setall input { flex: 1; }
+  .srow { display: grid; grid-template-columns: 90px 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .srow .id { font-weight: 600; font-size: 12.5px; }
+  .srow .id small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+  .srow input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .srow input.changed { border-color: var(--warn); }
+  .srow input.bad { border-color: var(--bad); }
+  .srow input.unset { color: var(--muted); font-style: italic; }
+  .srow .unsetbtn { font-size: 11px; padding: 4px 8px; }
+  .srow .warn { grid-column: 2 / 4; font-size: 11.5px; color: var(--warn); }
+  #dfoot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+  #dmsg { font-size: 12px; color: var(--muted); }
+  #dmsg.bad { color: var(--bad); }
+  #dmsg.ok { color: var(--ok); }
+  #banner {
+    display: none; padding: 6px 16px; background: rgba(210,153,34,.15); border-bottom: 1px solid var(--warn); font-size: 12.5px;
+  }
+  #banner.show { display: block; }
+  #toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;
+    background: #1f6feb; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+  .empty { padding: 40px; color: var(--muted); text-align: center; }
+  @media (max-width: 800px) { nav { display: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RMS Config Editor</h1>
+  <input type="search" id="q" placeholder="filter options or values…  ( / )" autocomplete="off">
+  <label class="chip" id="chip-vary"><input type="checkbox" id="only-vary">only varying</label>
+  <label class="chip" id="chip-miss"><input type="checkbox" id="only-miss">only missing somewhere</label>
+  <span class="spacer"></span>
+  <span class="meta" id="status">loading…</span>
+  <button id="reload">Reload</button>
+</header>
+<div id="banner">Config files changed on disk — <a href="#" id="banner-reload" style="color:var(--accent)">reload</a> to see the latest values.</div>
+
+<div id="layout">
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+
+<div id="drawer">
+  <div id="dhead">
+    <div>
+      <code id="dname"></code>
+      <div class="meta" id="dsec"></div>
+    </div>
+    <span class="spacer"></span>
+    <button id="dclose">Close (Esc)</button>
+  </div>
+  <div id="dbody">
+    <div id="dhelp"></div>
+    <div class="setall">
+      <input type="text" id="setall" placeholder="value for every station">
+      <button id="setall-btn">Apply to all</button>
+    </div>
+    <div id="rows"></div>
+  </div>
+  <div id="dfoot">
+    <button class="primary" id="dsave">Save (Enter)</button>
+    <button id="drevert">Revert</button>
+    <span id="dmsg"></span>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const POLL_MS = 5000;
+let state = null;          // last /api/state payload
+let files = [];            // state.files
+let current = 'all';       // section name or 'all'
+let editing = null;        // {section, option, row}
+let dirtyDrawer = false;
+
+const $ = (id) => document.getElementById(id);
+const nav = $('nav'), main = $('main');
+
+// --- data -----------------------------------------------------------------
+
+async function load(showStatus = true) {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    apply(await r.json());
+    if (showStatus) $('status').textContent = `${files.length} configs · loaded ${new Date().toLocaleTimeString()} · v${state.version}`;
+    $('banner').classList.remove('show');
+  } catch (e) {
+    $('status').textContent = 'server unreachable — ' + e.message;
+  }
+}
+
+function apply(payload) {
+  state = payload;
+  files = payload.files;
+  render();
+}
+
+// Poll only the mtimes; the file list is tiny, so re-fetching state is fine too,
+// but never yank the table out from under an open editor.
+async function poll() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    if (!r.ok) return;
+    const fresh = await r.json();
+    const changed = fresh.files.some((f, i) => !files[i] || f.mtime !== files[i].mtime || f.path !== files[i].path);
+    if (!changed) return;
+    if (editing) $('banner').classList.add('show');
+    else apply(fresh);
+  } catch (e) { /* keep the last view */ }
+}
+
+// --- rendering ------------------------------------------------------------
+
+function rowClass(row) {
+  if (row.missing && row.missing === files.length) return 'missing';
+  if (row.missing || row.distinct > 1) return 'vary';
+  return 'same';
+}
+
+function majority(row) {
+  const counts = {};
+  for (const v of Object.values(row.values)) if (v !== null) counts[v] = (counts[v] || 0) + 1;
+  let best = null, n = 0;
+  for (const [v, c] of Object.entries(counts)) if (c > n) { best = v; n = c; }
+  return n > 1 ? best : null;
+}
+
+function matches(row, q) {
+  if (!q) return true;
+  if (row.name.toLowerCase().includes(q)) return true;
+  return Object.values(row.values).some((v) => v !== null && v.toLowerCase().includes(q));
+}
+
+function visibleRows(section) {
+  const q = $('q').value.trim().toLowerCase();
+  const onlyVary = $('only-vary').checked, onlyMiss = $('only-miss').checked;
+  return section.options.filter((row) => {
+    if (onlyVary && rowClass(row) === 'same') return false;
+    if (onlyMiss && !row.missing) return false;
+    return matches(row, q);
+  });
+}
+
+function render() {
+  if (!state) return;
+  $('chip-vary').classList.toggle('on', $('only-vary').checked);
+  $('chip-miss').classList.toggle('on', $('only-miss').checked);
+
+  // Sidebar
+  const filtering = $('q').value.trim() || $('only-vary').checked || $('only-miss').checked;
+  const items = [{ name: 'all', label: 'All sections' }, ...state.sections.map((s) => ({ name: s.name, label: s.name, sec: s }))];
+  nav.replaceChildren(...items.map((it) => {
+    const a = document.createElement('a');
+    a.className = it.name === current ? 'active' : '';
+    a.textContent = it.label;
+    const n = document.createElement('span');
+    n.className = 'n';
+    if (it.sec) {
+      const vary = it.sec.options.filter((r) => rowClass(r) !== 'same').length;
+      n.textContent = vary ? `${vary} ≠` : `${it.sec.options.length}`;
+      if (vary) n.classList.add('vary');
+    } else {
+      n.textContent = state.sections.reduce((a, s) => a + s.options.length, 0);
+    }
+    a.append(n);
+    a.onclick = () => { current = it.name; localStorage.setItem('cfg.section', current); render(); };
+    return a;
+  }));
+
+  // Table
+  const sections = current === 'all' ? state.sections : state.sections.filter((s) => s.name === current);
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.className = 'opt'; th0.textContent = 'option';
+  hr.append(th0);
+  for (const f of files) {
+    const th = document.createElement('th');
+    th.textContent = f.id;
+    th.title = `${f.path}\nmodified ${new Date(f.mtime * 1000).toLocaleString()}`;
+    const sub = document.createElement('span'); sub.className = 'sub';
+    if (f.shared) sub.textContent = 'shared base';
+    else if (f.station_id && f.station_id !== f.id) { sub.textContent = `stationID: ${f.station_id}`; sub.classList.add('warnid'); }
+    else sub.textContent = f.station_id ? '' : 'no stationID';
+    if (sub.textContent) th.append(sub);
+    hr.append(th);
+  }
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = document.createElement('tbody');
+  let shown = 0;
+  for (const sec of sections) {
+    const rows = visibleRows(sec);
+    if (!rows.length) continue;
+    if (current === 'all' || filtering) {
+      const tr = document.createElement('tr'); tr.className = 'sec';
+      const td = document.createElement('td'); td.colSpan = files.length + 1; td.textContent = `[${sec.name}]`;
+      tr.append(td); tbody.append(tr);
+    }
+    for (const row of rows) {
+      shown++;
+      const cls = rowClass(row);
+      const tr = document.createElement('tr'); tr.className = 'row ' + cls;
+      const td0 = document.createElement('td'); td0.className = 'opt' + (cls !== 'same' ? ' vary' : '');
+      td0.textContent = row.name;
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + cls;
+      tag.textContent = cls === 'same' ? 'same' : cls === 'missing' ? 'unset' : (row.missing ? `${row.missing} missing` : `${row.distinct} values`);
+      td0.append(tag);
+      if (row.help) td0.title = row.help;
+      tr.append(td0);
+      const maj = majority(row);
+      files.forEach((f, i) => {
+        const td = document.createElement('td');
+        const v = row.values[f.id];
+        td.className = 'val' + (i === 0 ? ' first' : '');
+        if (v === null) { td.classList.add('missing'); td.textContent = '—'; td.title = 'not set — RMS default applies'; }
+        else { td.textContent = v; td.title = v; if (cls === 'vary' && v === maj) td.classList.add('maj'); }
+        tr.append(td);
+      });
+      tr.onclick = () => openEditor(sec.name, row);
+      tbody.append(tr);
+    }
+  }
+  table.append(tbody);
+  if (!shown) {
+    const d = document.createElement('div'); d.className = 'empty'; d.textContent = 'nothing matches';
+    main.replaceChildren(d);
+  } else main.replaceChildren(table);
+}
+
+// --- editor drawer --------------------------------------------------------
+
+const drawer = $('drawer');
+
+function openEditor(section, row) {
+  editing = { section, option: row.name, key: row.key, type: row.type, row };
+  dirtyDrawer = false;
+  $('dname').textContent = row.name;
+  $('dsec').textContent = `[${section}] · ${row.type}`;
+  $('dhelp').textContent = row.help || '(no comment in the config)';
+  $('dhelp').style.display = row.help ? '' : 'none';
+  $('setall').value = '';
+  $('dmsg').textContent = ''; $('dmsg').className = '';
+  $('rows').replaceChildren(...files.map((f) => {
+    const v = row.values[f.id];
+    const div = document.createElement('div'); div.className = 'srow'; div.dataset.id = f.id;
+    const id = document.createElement('span'); id.className = 'id'; id.textContent = f.id;
+    const inp = document.createElement('input'); inp.type = 'text';
+    inp.dataset.orig = v === null ? '\0' : v;
+    inp.dataset.unset = v === null ? '1' : '';
+    inp.value = v === null ? '' : v;
+    inp.placeholder = v === null ? '(unset — RMS default)' : '';
+    if (v === null) inp.classList.add('unset');
+    inp.oninput = () => { inp.dataset.unset = ''; inp.classList.remove('unset'); inp.placeholder = ''; refreshRow(div); };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } };
+    const b = document.createElement('button'); b.className = 'unsetbtn'; b.textContent = 'unset';
+    b.title = 'comment the option out so RMS uses its built-in default';
+    b.onclick = () => { inp.value = ''; inp.dataset.unset = '1'; inp.classList.add('unset'); inp.placeholder = '(unset — RMS default)'; refreshRow(div); };
+    const w = document.createElement('div'); w.className = 'warn';
+    div.append(id, inp, b, w);
+    return div;
+  }));
+  drawer.classList.add('open');
+  const first = $('rows').querySelector('input');
+  if (first) { first.focus(); first.select(); }
+}
+
+function closeEditor() {
+  editing = null; dirtyDrawer = false;
+  drawer.classList.remove('open');
+  if ($('banner').classList.contains('show')) load();
+}
+
+function typeWarning(v, type) {
+  if (type === 'int' && !/^[+-]?\d+$/.test(v.trim())) return `RMS reads this as an int`;
+  if (type === 'float' && isNaN(Number(v.trim())) ) return `RMS reads this as a float`;
+  if (type === 'bool' && !/^(1|0|yes|no|true|false|on|off)$/i.test(v.trim())) return `RMS reads this as a bool (true/false)`;
+  if (v.includes(';')) return `';' starts a comment in RMS configs`;
+  return '';
+}
+
+function refreshRow(div) {
+  const inp = div.querySelector('input');
+  const unset = inp.dataset.unset === '1';
+  const changed = unset ? inp.dataset.orig !== '\0' : (inp.dataset.orig === '\0' || inp.value !== inp.dataset.orig);
+  inp.classList.toggle('changed', changed);
+  const w = unset ? '' : typeWarning(inp.value, editing.type);
+  div.querySelector('.warn').textContent = changed ? w : '';
+  inp.classList.toggle('bad', changed && !!w);
+  dirtyDrawer = [...$('rows').querySelectorAll('input')].some((i) => i.classList.contains('changed'));
+}
+
+$('setall-btn').onclick = applyAll;
+$('setall').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); applyAll(); save(); } };
+function applyAll() {
+  const v = $('setall').value;
+  for (const div of $('rows').children) {
+    const inp = div.querySelector('input');
+    inp.value = v; inp.dataset.unset = ''; inp.classList.remove('unset'); inp.placeholder = '';
+    refreshRow(div);
+  }
+}
+
+$('drevert').onclick = () => openEditor(editing.section, editing.row);
+$('dclose').onclick = closeEditor;
+$('dsave').onclick = save;
+
+async function save() {
+  if (!editing) return;
+  const values = {}, expect = {};
+  for (const div of $('rows').children) {
+    const inp = div.querySelector('input');
+    if (!inp.classList.contains('changed')) continue;
+    values[div.dataset.id] = inp.dataset.unset === '1' ? null : inp.value;
+  }
+  if (!Object.keys(values).length) { setMsg('nothing changed', ''); return; }
+  for (const f of files) expect[f.id] = f.mtime;
+  $('dsave').disabled = true;
+  setMsg('saving…', '');
+  try {
+    const r = await fetch('/api/set', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: editing.section, option: editing.option, values, expect_mtimes: expect }),
+    });
+    const payload = await r.json();
+    if (r.status === 409) {
+      apply(payload);
+      setMsg(`${payload.result.conflict.join(', ')} changed on disk since you loaded — values refreshed, nothing written. Edit again.`, 'bad');
+      const row = findRow(editing.section, editing.key);
+      if (row) openEditor(editing.section, row);
+      return;
+    }
+    if (!r.ok) throw new Error(payload.error || r.statusText);
+    apply(payload);
+    const w = payload.result.written;
+    const baks = Object.keys(payload.result.backups || {});
+    toast(w.length ? `Saved ${editing.option} → ${w.join(', ')}${baks.length ? ' · backups made' : ''}` : 'no change written');
+    closeEditor();
+  } catch (e) {
+    setMsg('save failed: ' + e.message, 'bad');
+  } finally {
+    $('dsave').disabled = false;
+  }
+}
+
+function findRow(section, key) {
+  const sec = state.sections.find((s) => s.name === section);
+  return sec && sec.options.find((r) => r.key === key);
+}
+
+function setMsg(text, cls) { $('dmsg').textContent = text; $('dmsg').className = cls; }
+
+let toastTimer = null;
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// --- wiring ----------------------------------------------------------------
+
+$('q').oninput = render;
+$('only-vary').onchange = render;
+$('only-miss').onchange = render;
+$('reload').onclick = () => load();
+$('banner-reload').onclick = (e) => { e.preventDefault(); if (editing) closeEditor(); load(); };
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && editing) { closeEditor(); return; }
+  if (e.key === '/' && !editing && document.activeElement !== $('q')) { e.preventDefault(); $('q').focus(); }
+});
+window.addEventListener('beforeunload', (e) => { if (dirtyDrawer) { e.preventDefault(); e.returnValue = ''; } });
+
+current = localStorage.getItem('cfg.section') || 'all';
+load();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

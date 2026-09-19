@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "config_editor"
+version = "1.0.0"
+description = "See and set RMS .config options across every station on a machine, side by side"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "ContrailCast"}]
+keywords = ["rms", "meteor", "config", "multicam"]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+config-editor = "config_editor.__main__:main"
+
+[tool.setuptools]
+packages = ["config_editor"]
+
+[tool.setuptools.package-data]
+config_editor = ["static/*"]
