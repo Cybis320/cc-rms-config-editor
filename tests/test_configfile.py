@@ -248,3 +248,16 @@ def test_quota_check(tmp_path):
     fleet.apply("Capture", "quota_management_enabled", {"XX0001": "false"}, backup=False)
     fleet.apply("Capture", "continuous_capture_quota", {"XX0001": "965"}, backup=False)
     assert fleet.checks() == []   # quota management off: RMS never looks at the split
+
+
+def test_journal_records_old_and_new(tmp_path, monkeypatch):
+    import config_editor.fleet as fl
+    monkeypatch.setattr(fl, "JOURNAL", tmp_path / "changes.log")
+    root = make_stations(tmp_path, n=2)
+    fleet = Fleet.load(discover(root, tmp_path / "no-rms"), tmp_path / "no-rms")
+    fleet.apply("System", "elevation", {"XX0001": "500", "XX0002": "443.518"}, backup=False)
+    fleet.apply("System", "elevation", {"XX0001": None}, backup=False)
+    text = (tmp_path / "changes.log").read_text()
+    assert "set [System] elevation  XX0001: 443.518 -> 500" in text
+    assert "XX0002" not in text                       # unchanged station not journaled
+    assert "XX0001: 500 -> (unset)" in text

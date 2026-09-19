@@ -8,6 +8,7 @@ the UI can warn about a value RMS would choke on.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -19,6 +20,19 @@ from .configfile import ConfigFile
 
 DEFAULT_STATIONS_DIR = Path.home() / "source" / "Stations"
 DEFAULT_RMS_DIR = Path.home() / "source" / "RMS"
+# Every write is appended here (time, who/what, option, per-station old -> new) so a
+# surprising value can always be traced back. Override with CONFIG_EDITOR_JOURNAL.
+JOURNAL = Path(os.environ.get("CONFIG_EDITOR_JOURNAL") or
+               (Path.home() / ".local" / "state" / "config-editor" / "changes.log"))
+
+
+def journal(line: str) -> None:
+    try:
+        JOURNAL.parent.mkdir(parents=True, exist_ok=True)
+        with open(JOURNAL, "a", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), line))
+    except OSError:
+        pass
 
 
 @dataclass
@@ -256,6 +270,7 @@ class Fleet:
         n = cf.dedupe(section, option)
         bak = None
         if n:
+            journal("dedupe [%s] %s  %s: commented out %d earlier copies" % (section, option, tid, n))
             do_backup = backup and (backup_done is None or tid not in backup_done)
             bak = cf.save(backup=do_backup)
             if backup_done is not None:
@@ -297,6 +312,8 @@ class Fleet:
                 entry["backup"] = None if bak is None else str(bak)
                 self.files[tid] = cf
                 self._append_migrate_log(cf, log, bak)
+                journal("migrate %s  rewritten on the template layout%s (recent=%s)"
+                        % (tid, (", backup %s" % bak) if bak else "", recent))
             result[tid] = entry
         return result
 
@@ -341,11 +358,16 @@ class Fleet:
 
         written: list[str] = []
         backups: dict[str, str] = {}
+        changes: list[str] = []
         for tid, value in values.items():
             cf = fresh[tid]
+            before = cf.get(section, option)
+            before_v = None if before is None else before.value
             changed = cf.unset(section, option) if value is None else cf.set(section, option, str(value))
             if not changed:
                 continue
+            changes.append("%s: %s -> %s" % (tid, "(unset)" if before_v is None else before_v,
+                                             "(unset)" if value is None else value))
             do_backup = backup and (backup_done is None or tid not in backup_done)
             bak = cf.save(backup=do_backup)
             if backup_done is not None:
@@ -354,6 +376,9 @@ class Fleet:
                 backups[tid] = str(bak)
             written.append(tid)
             self.files[tid] = cf
+        if changes:
+            journal("set [%s] %s  %s%s" % (section, option, "; ".join(changes),
+                                            ("  (backups: %s)" % ", ".join(sorted(backups))) if backups else ""))
         return {"written": written, "conflict": [], "backups": backups}
 
 

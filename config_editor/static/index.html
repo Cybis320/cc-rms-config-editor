@@ -83,6 +83,8 @@
   }
   tbody tr.row { cursor: pointer; }
   tbody tr.row:hover td { background: var(--line2); }
+  tbody tr.row.editing td { background: rgba(88,166,255,.12); }
+  tbody tr.row.editing td.opt { box-shadow: inset 3px 0 0 var(--accent); }
   td { padding: 5px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; white-space: nowrap; }
   td.opt { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; }
   .tag { font-size: 10px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; vertical-align: middle; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; }
@@ -436,6 +438,8 @@ function render() {
         tr.append(td);
       }
       tr.onclick = () => openEditor(sec.name, row);
+      tr.dataset.sec = sec.name; tr.dataset.key = row.key;
+      if (editing && editing.section === sec.name && editing.key === row.key) tr.classList.add('editing');
       tbody.append(tr);
     }
   }
@@ -478,6 +482,7 @@ function openEditor(section, row) {
     return div;
   }));
   drawer.classList.add('open');
+  for (const tr of main.querySelectorAll('tr.row')) tr.classList.toggle('editing', tr.dataset.sec === section && tr.dataset.key === row.key);
   const first = $('rows').querySelector('input');
   if (first) { first.focus(); first.select(); }
 }
@@ -485,6 +490,7 @@ function openEditor(section, row) {
 function closeEditor() {
   editing = null; dirtyDrawer = false;
   drawer.classList.remove('open');
+  for (const tr of main.querySelectorAll('tr.row.editing')) tr.classList.remove('editing');
   if ($('banner').classList.contains('show')) load();
 }
 

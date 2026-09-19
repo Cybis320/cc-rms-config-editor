@@ -117,6 +117,11 @@ absent from a file is added at the end of its section (re-enabling a commented
 session snapshots it first as `.config.bak.<timestamp>` beside it, the same
 naming RMS's `MigrateConfig` uses.
 
+Every write, from the page or the CLI, is appended to
+`~/.local/state/config-editor/changes.log` with the option and each station's
+old and new value, so any surprising setting can be traced to the change that
+made it (`CONFIG_EDITOR_JOURNAL` overrides the path).
+
 If a file changes on disk while you have the page open (another editor, a
 migration), a banner appears; a save against a stale copy is refused and the
 values refreshed so nothing is clobbered.

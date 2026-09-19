@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import __version__
-from .fleet import Fleet, check_value, code_version
+from .fleet import Fleet, check_value, code_version, journal
 
 STATIC_DIR = Path(__file__).parent / "static"
 REPO_DIR = Path(__file__).resolve().parents[1]
@@ -113,6 +113,7 @@ class EditorHandler(BaseHTTPRequestHandler):
                     if v is not None for w in [check_value(v, kind)] if w}
 
         with self.lock:
+            journal("ui  %s  POST /api/set [%s] %s for %s" % (self.client_address[0], section, option, ", ".join(values)))
             result = self.fleet.apply(section, option, values, expect_mtimes=expect,
                                       backup_done=self.backup_done)
             payload = self._state_payload()

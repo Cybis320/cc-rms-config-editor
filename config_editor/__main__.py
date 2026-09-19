@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .fleet import DEFAULT_RMS_DIR, DEFAULT_STATIONS_DIR, Fleet, check_value, discover
+from .fleet import DEFAULT_RMS_DIR, DEFAULT_STATIONS_DIR, Fleet, check_value, discover, journal
 
 
 def _add_location_args(p: argparse.ArgumentParser) -> None:
@@ -91,6 +91,7 @@ def cmd_set(args: argparse.Namespace) -> None:
     warn = check_value(value or "", fleet.types.get(key))
     if warn and not args.force:
         raise SystemExit(warn + " (use --force to write it anyway)")
+    journal("cli  config-editor set %s" % " ".join(sys.argv[2:]))
     result = fleet.apply(section, key, {i: value for i in ids}, backup=not args.no_backup)
     for i in ids:
         state = "written" if i in result["written"] else "unchanged"
