@@ -207,3 +207,13 @@ config-editor audit --include-root      # the RMS root .config as an extra colum
 ```bash
 python -m pytest tests
 ```
+
+`tests/ui/drive.js` drives the page itself in jsdom with a mocked server and
+checks which option every save path posts (fill + Save, Enter in the fill box,
+Enter in a station box, Esc discarding staged values, a poll or a filter
+re-render while the drawer is open, adjacent rows in the *only varying* view):
+
+```bash
+npm install jsdom@22        # once
+node tests/ui/drive.js
+```
