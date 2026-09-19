@@ -61,6 +61,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._set(body)
             elif path == "/api/migrate":
                 self._migrate(body)
+            elif path == "/api/dedupe":
+                self._dedupe(body)
             else:
                 self._send_error(404, "not found")
         except BrokenPipeError:
@@ -118,13 +120,24 @@ class EditorHandler(BaseHTTPRequestHandler):
         payload["warnings"] = warnings
         self._send_json(409 if result["conflict"] else 200, payload)
 
+    def _dedupe(self, body: dict) -> None:
+        tid, section, option = (str(body.get(k, "")).strip() for k in ("station", "section", "option"))
+        if not tid or not section or not option:
+            raise ValueError("need station, section and option")
+        with self.lock:
+            result = self.fleet.dedupe(tid, section, option, backup_done=self.backup_done)
+            payload = self._state_payload()
+        payload["result"] = result
+        self._send_json(200, payload)
+
     def _migrate(self, body: dict) -> None:
         ids = body.get("stations")
         apply = bool(body.get("apply", False))
+        recent = bool(body.get("recent", False))
         if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
             raise ValueError("need a non-empty list of stations")
         with self.lock:
-            result = self.fleet.migrate(ids, apply=apply, backup_done=self.backup_done)
+            result = self.fleet.migrate(ids, apply=apply, recent=recent, backup_done=self.backup_done)
             payload = self._state_payload() if apply else {}
         payload["result"] = result
         self._send_json(200, payload)

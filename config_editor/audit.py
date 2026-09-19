@@ -33,6 +33,10 @@ from .configfile import INLINE_COMMENT, OPTION_RE, SECTION_RE, ConfigFile
 _READER_RE = re.compile(
     r'parser\.(?:has_option|get(?:boolean|int|float)?)\([^,]+,\s*["\'](\w+)["\']')
 
+# Options whose template default changed recently: MigrateConfig's -r/--recent replaces the
+# station's value with the template's for these (Utils/MigrateConfig.py recent_defaults_list).
+RECENT_DEFAULTS = {("Calibration", "star_catalog_file")}
+
 LEGACY_RENAMES = {
     # old option -> (new option, value mapping); MigrateConfig's special case
     "quota_management_disabled": ("quota_management_enabled", {"true": "false", "false": "true"}),
@@ -62,7 +66,11 @@ def _truthy(v: str) -> bool:
 
 def audit(station: ConfigFile, template: ConfigFile | None, known: set[str] | None) -> dict:
     """Compare one station file with the template and ConfigReader (see module doc)."""
-    out = {"missing": [], "unknown": [], "disabled": [], "extra": []}
+    out = {"missing": [], "unknown": [], "disabled": [], "extra": [], "duplicate": []}
+    for (sec, key), lines in station.duplicates.items():
+        e = station.entries[(sec, key)]
+        out["duplicate"].append({"section": sec, "name": e.option, "key": key, "value": e.value,
+                                 "copies": len(lines) + 1})
     if template is not None:
         for (sec, key), te in template.entries.items():
             if (sec, key) in station.entries:
@@ -90,23 +98,38 @@ def audit(station: ConfigFile, template: ConfigFile | None, known: set[str] | No
 
 
 def migrate(station: ConfigFile, template: ConfigFile, known: set[str] | None,
-            tool: str = "config-editor") -> tuple[list[str], list[str]]:
-    """Rebuild ``station`` on the template layout. Returns (new_lines, log)."""
+            recent: bool = False, tool: str = "config-editor") -> tuple[list[str], list[str]]:
+    """Rebuild ``station`` on the template layout. Returns (new_lines, log).
+
+    ``recent`` takes the template's value for the options in RECENT_DEFAULTS even
+    when the station has its own (MigrateConfig's -r).
+    """
     log: list[str] = []
 
     # The station's values, with the legacy renames applied
     values: dict[tuple[str, str], tuple[str, str]] = {}   # (sec, key) -> (spelling, value)
     for (sec, key), e in station.entries.items():
         values[(sec, key)] = (e.option, e.value)
+    for (sec, key), lines in station.duplicates.items():
+        log.append("[%s] %s: %d copies in the file, keeping the last (%r)"
+                   % (sec, station.entries[(sec, key)].option, len(lines) + 1, values[(sec, key)][1]))
     for old, (new, mapping) in LEGACY_RENAMES.items():
         for (sec, key) in list(values):
             if key != old:
                 continue
             _, v = values.pop((sec, key))
-            if (sec, new) not in values:
-                nv = "false" if _truthy(v) else "true" if old.endswith("disabled") else mapping.get(v.lower(), v)
-                values[(sec, new)] = (new, nv)
-                log.append("[%s] %s: %s -> %s: %s (legacy option renamed)" % (sec, old, v, new, nv))
+            if (sec, new) in values:
+                log.append("[%s] %s: %s => DROPPED (superseded by %s: %s)" % (sec, old, v, new, values[(sec, new)][1]))
+                continue
+            nv = "false" if _truthy(v) else "true" if old.endswith("disabled") else mapping.get(v.lower(), v)
+            values[(sec, new)] = (new, nv)
+            log.append("[%s] %s: %s -> %s: %s (legacy option renamed)" % (sec, old, v, new, nv))
+    if recent:
+        for key in RECENT_DEFAULTS:
+            te = template.entries.get(key)
+            if te is not None and key in values and values[key][1] != te.value:
+                log.append("[%s] %s: %r => RECENT template default %r" % (key[0], te.option, values[key][1], te.value))
+                values[key] = (te.option, te.value)
 
     out: list[str] = []
     used: set[tuple[str, str]] = set()
@@ -156,9 +179,15 @@ def migrate(station: ConfigFile, template: ConfigFile, known: set[str] | None,
             out.append("")
             out.append("[%s]" % sec)
             start = end = len(out)
-        insert_at = end
-        while insert_at > start and not out[insert_at - 1].strip():
-            insert_at -= 1
+        insert_at = None
+        for i in range(end - 1, start - 1, -1):
+            if OPTION_RE.match(out[i]) and not out[i].lstrip().startswith((";", "#")):
+                insert_at = i + 1
+                break
+        if insert_at is None:
+            insert_at = end
+            while insert_at > start and not out[insert_at - 1].strip():
+                insert_at -= 1
         block = ["", "; The following options were preserved but are not in the template"]
         block += ["%s: %s" % (spelling, value) for spelling, value in items]
         out[insert_at:insert_at] = block

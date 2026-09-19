@@ -95,8 +95,9 @@ Toggle **only varying** to get a diff of the whole machine at a glance.
 When RMS's `.configTemplate` exists (it is written by `RMS_Update.sh`), it is
 shown as a last, italic *template* column. Any cell that differs from the
 template value is dotted-underlined, **only ≠ template** filters down to those
-rows, and the editor drawer offers *use for every station* with the template
-value. Options that `ConfigReader.py` never reads are tagged **not in RMS**
+rows (your customisations, value by value — not to be confused with the
+**Audit**, which compares which *options* exist), and the editor drawer offers
+*fill every station with it* for the template value. Options that `ConfigReader.py` never reads are tagged **not in RMS**
 (RMS silently ignores them). A cell that is commented out in a file shows the
 old value after a `;`.
 
@@ -131,6 +132,7 @@ station at once and makes each finding actionable:
 | **Not implemented in RMS** | `ConfigReader.py` never reads it — a typo or a leftover, ignored by RMS | *comment out* |
 | **Commented out** | a `; option: value` line for an option RMS knows | *enable* (with its old value) |
 | **Not in the template** | RMS knows it but the template lacks it (an alpha feature, say); a migration keeps it | — |
+| **Duplicate** | the same option twice in one section — RMS's strict parser refuses to start; the last copy is the one shown and edited | *keep last* (comments the earlier copies out) |
 
 ## Migrate
 
@@ -140,10 +142,18 @@ per station and with a preview: each file is rebuilt on the template's layout
 template default is carried over, options RMS knows but the template lacks are
 appended to their section under a marker comment, unknown options are dropped
 and listed, and the legacy `quota_management_disabled` is folded into
-`quota_management_enabled`. **Preview** shows the migration log and the exact
-unified diff for each selected station; **Apply** rewrites the selected files
-after a `.config.bak.<timestamp>` snapshot. A second migration of an
-up-to-date file is a no-op.
+`quota_management_enabled` (or dropped when the new option is already there).
+Duplicated options collapse to their last copy. **Preview** shows the migration
+log and the exact unified diff for each selected station; **Apply** rewrites
+the selected files after a `.config.bak.<timestamp>` snapshot and appends the
+log to `<stationID>_MigrateConfig.log` beside the file, as MigrateConfig does.
+A second migration of an up-to-date file is a no-op. The *recently changed
+defaults* checkbox is MigrateConfig's `-r`: it resets `star_catalog_file` to
+the template value as well.
+
+MigrateConfig also migrates the RMS root `.config` (the one `add_GStation`
+copies to new stations). Start the editor with `--include-root` to get it as an
+extra *RMS* column and include it in audits and migrations.
 
 ## Command line
 
@@ -167,6 +177,8 @@ config-editor migrate                  # dry run: what a migration would change
 config-editor migrate --diff           # ... with the unified diff per station
 config-editor migrate --apply          # rewrite every station on the template layout
 config-editor migrate --apply --stations US005A
+config-editor migrate --apply --recent  # MigrateConfig -r: reset star_catalog_file to the template value
+config-editor audit --include-root      # the RMS root .config as an extra column
 ```
 
 ## Tests

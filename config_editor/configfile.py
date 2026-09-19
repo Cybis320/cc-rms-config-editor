@@ -44,6 +44,7 @@ class ConfigFile:
     sections: list[str] = field(default_factory=list)
     entries: dict[tuple[str, str], Entry] = field(default_factory=dict)
     disabled: dict[tuple[str, str], str] = field(default_factory=dict)  # commented-out candidates
+    duplicates: dict[tuple[str, str], list[int]] = field(default_factory=dict)  # earlier copies' line numbers
     newline: str = "\n"
 
     # --- reading ---------------------------------------------------------
@@ -65,6 +66,7 @@ class ConfigFile:
         self.sections = []
         self.entries = {}
         self.disabled = {}
+        self.duplicates = {}
         section = None
         pending_help: list[str] = []
         for i, line in enumerate(self.lines):
@@ -92,6 +94,10 @@ class ConfigFile:
                 help_text = "\n".join(pending_help).strip()
                 # Lines like "; Weblog and PerfMonitor" / "; -----" are headings, not help.
                 key = (section, option.lower())
+                if key in self.entries:
+                    # RMS's strict parser raises DuplicateOptionError on these; the last one
+                    # is what a lenient parse would keep, so that is the one we edit.
+                    self.duplicates.setdefault(key, []).append(self.entries[key].line_no)
                 self.entries[key] = Entry(section, option, value, i, help_text)
             pending_help = []
 
@@ -142,13 +148,31 @@ class ConfigFile:
                 self._index()
                 return True
 
-        # Otherwise append after the last non-blank line of the section
-        insert_at = end
-        while insert_at > start and not self.lines[insert_at - 1].strip():
-            insert_at -= 1
+        # Otherwise append after the section's last option line (so a trailing comment such
+        # as a migration marker stays last); a section with no options gets it after its
+        # last non-blank line.
+        insert_at = None
+        for i in range(end - 1, start - 1, -1):
+            if OPTION_RE.match(self.lines[i]) and not COMMENT_RE.match(self.lines[i]):
+                insert_at = i + 1
+                break
+        if insert_at is None:
+            insert_at = end
+            while insert_at > start and not self.lines[insert_at - 1].strip():
+                insert_at -= 1
         self.lines[insert_at:insert_at] = ["", "%s: %s" % (option, value)]
         self._index()
         return True
+
+    def dedupe(self, section: str, option: str) -> int:
+        """Comment out every copy of the option but the last. Returns how many."""
+        key = (section, option.lower())
+        earlier = self.duplicates.get(key, [])
+        for line_no in earlier:
+            self.lines[line_no] = "; " + self.lines[line_no]
+        if earlier:
+            self._index()
+        return len(earlier)
 
     def unset(self, section: str, option: str) -> bool:
         """Comment the option out so RMS falls back to its built-in default."""

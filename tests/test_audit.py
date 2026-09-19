@@ -89,7 +89,7 @@ def test_audit(files):
 def test_audit_without_reader_or_template(files):
     station, template = files
     a = audit(station, None, None)
-    assert a == {"missing": [], "unknown": [], "disabled": [], "extra": []}
+    assert a == {"missing": [], "unknown": [], "disabled": [], "extra": [], "duplicate": []}
     a = audit(station, template, None)
     assert a["unknown"] == [] and len(a["missing"]) == 4
     assert [d["key"] for d in a["extra"]] == ["old_bogus_option", "quota_management_disabled", "star_gate_factor", "meteor_color"]
@@ -192,3 +192,120 @@ def test_fleet_migrate_and_audit(tmp_path):
 
     with pytest.raises(KeyError):
         fleet.migrate(["nope"])
+
+
+# --- edge cases MigrateConfig calls out --------------------------------------
+
+DUP = """[Capture]
+fps: 25
+; a comment
+fps: 24.98
+quota_management_disabled: true
+quota_management_enabled: false
+
+[Calibration]
+star_catalog_file: BSC5
+"""
+
+
+def test_duplicates_detected_last_wins_and_dedupe(tmp_path):
+    p = tmp_path / ".config"
+    p.write_text(DUP)
+    cf = ConfigFile.load(p)
+    assert cf.get("Capture", "fps").value == "24.98"
+    assert cf.duplicates == {("Capture", "fps"): [1]}
+    a = audit(cf, None, None)
+    assert a["duplicate"] == [{"section": "Capture", "name": "fps", "key": "fps", "value": "24.98", "copies": 2}]
+    assert cf.dedupe("Capture", "fps") == 1
+    assert cf.duplicates == {} and cf.lines[1] == "; fps: 25"
+    assert cf.dedupe("Capture", "fps") == 0
+    # set() edits the surviving copy
+    cf.set("Capture", "fps", "30")
+    assert cf.lines[3] == "fps: 30"
+
+
+def test_migrate_dedupes_legacy_both_present_and_recent(tmp_path):
+    t = tmp_path / ".configTemplate"
+    t.write_text("[Capture]\nfps: 25.0\nquota_management_enabled: false\n\n[Calibration]\nstar_catalog_file: gaia_dr2_mag_11.5.npy\n")
+    p = tmp_path / ".config"
+    p.write_text(DUP)
+    cf, tpl = ConfigFile.load(p), ConfigFile.load(t)
+    known = {"fps", "quota_management_enabled", "star_catalog_file"}
+    new, log = migrate(cf, tpl, known)
+    text = "\n".join(new)
+    assert text.count("\nfps:") == 1 and "fps: 24.98" in text
+    # the file already had the new option: the legacy one is dropped, not converted
+    assert "quota_management_enabled: false" in text and "quota_management_disabled" not in text
+    assert any("superseded by quota_management_enabled" in l for l in log)
+    assert any("2 copies" in l and "fps" in l for l in log)
+    assert "star_catalog_file: BSC5" in text                         # kept without --recent
+    new, log = migrate(cf, tpl, known, recent=True)
+    assert "star_catalog_file: gaia_dr2_mag_11.5.npy" in "\n".join(new)
+    assert any("RECENT template default" in l for l in log)
+
+
+def test_legacy_quota_true_becomes_enabled_false(tmp_path):
+    t = tmp_path / ".configTemplate"
+    t.write_text("[Capture]\nquota_management_enabled: false\n")
+    p = tmp_path / ".config"
+    p.write_text("[Capture]\nquota_management_disabled: true\n")
+    new, _ = migrate(ConfigFile.load(p), ConfigFile.load(t), None)
+    assert "quota_management_enabled: false" in new
+    p.write_text("[Capture]\nquota_management_disabled: no\n")
+    new, _ = migrate(ConfigFile.load(p), ConfigFile.load(t), None)
+    assert "quota_management_enabled: true" in new
+
+
+def test_set_inserts_before_trailing_comment_after_migration(tmp_path):
+    t = tmp_path / ".configTemplate"
+    t.write_text("[Colors]\nmeteor_color: red\n")
+    p = tmp_path / ".config"
+    p.write_text("[Colors]\nmeteor_color: blue\n")
+    cf, tpl = ConfigFile.load(p), ConfigFile.load(t)
+    new, _ = migrate(cf, tpl, None)
+    cf.lines = new
+    cf._index()
+    cf.set("Colors", "sporadic_color", "gray")
+    assert cf.lines[-1].startswith("; Migrated to the")
+    i = cf.lines.index("sporadic_color: gray")
+    assert cf.lines[i - 2:i] == ["meteor_color: blue", ""]
+    # and a section holding only comments still takes the option after them
+    cf2 = ConfigFile(path=p, lines=["[X]", "; only a comment", "", "[Y]", "a: 1"])
+    cf2._index()
+    cf2.set("X", "b", "2")
+    assert cf2.lines[:4] == ["[X]", "; only a comment", "", "b: 2"]
+
+
+def test_migrate_keeps_station_newline_and_empty_values(tmp_path):
+    t = tmp_path / ".configTemplate"
+    t.write_text("[Build]\nwin_pc_weave:\nlinux_pc_weave: -O3\n")
+    p = tmp_path / ".config"
+    p.write_bytes(b"[Build]\r\nwin_pc_weave:\r\nlinux_pc_weave: -O3 -march=native\r\n")
+    cf, tpl = ConfigFile.load(p), ConfigFile.load(t)
+    new, log = migrate(cf, tpl, None)
+    cf.lines = new
+    cf.save(backup=False)
+    raw = p.read_bytes()
+    assert b"\r\n" in raw and b"win_pc_weave:\r\n" in raw and b"linux_pc_weave: -O3 -march=native\r\n" in raw
+    assert not any("win_pc_weave" in l for l in log)   # equal empty values are not "kept"
+
+
+def test_fleet_include_root_and_migrate_log(tmp_path):
+    from config_editor.fleet import Fleet, discover
+    rms = tmp_path / "RMS"
+    (rms / "RMS").mkdir(parents=True)
+    (rms / ".configTemplate").write_text(TEMPLATE)
+    (rms / ".config").write_text(STATION.replace("US005B", "XX0001"))
+    (rms / "RMS" / "ConfigReader.py").write_text("")
+    root = tmp_path / "Stations"
+    (root / "US005A").mkdir(parents=True)
+    (root / "US005A" / ".config").write_text(STATION.replace("US005B", "US005A"))
+    assert [t.id for t in discover(root, rms)] == ["US005A"]
+    targets = discover(root, rms, include_root=True)
+    assert [t.id for t in targets] == ["US005A", "RMS"]
+    fleet = Fleet.load(targets, rms)
+    res = fleet.migrate(["US005A", "RMS"], apply=True, backup=False)
+    assert all(r["written"] for r in res.values())
+    log = (root / "US005A" / "US005A_MigrateConfig.log").read_text()
+    assert "Migration Log" in log and "kept '33.58'" in log and "applied successfully" in log
+    assert (rms / "XX0001_MigrateConfig.log").exists()

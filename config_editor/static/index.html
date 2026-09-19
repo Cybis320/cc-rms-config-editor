@@ -172,10 +172,10 @@
   <input type="search" id="q" placeholder="filter options or values…  ( / )" autocomplete="off">
   <label class="chip" id="chip-vary"><input type="checkbox" id="only-vary">only varying</label>
   <label class="chip" id="chip-miss"><input type="checkbox" id="only-miss">only missing somewhere</label>
-  <label class="chip" id="chip-nt" style="display:none"><input type="checkbox" id="only-nt">only ≠ template</label>
+  <label class="chip" id="chip-nt" style="display:none" title="rows where a station's VALUE differs from the template's value — your customisations. Not the audit: that checks which OPTIONS exist (missing, unknown to RMS, commented out, duplicated)."><input type="checkbox" id="only-nt">only ≠ template</label>
   <span class="spacer"></span>
   <span class="meta" id="status">loading…</span>
-  <button id="audit-btn">Audit</button>
+  <button id="audit-btn" title="which options are missing vs. the template, unknown to RMS, commented out or duplicated — per station">Audit</button>
   <button id="migrate-btn">Migrate</button>
   <button id="reload">Reload</button>
 </header>
@@ -599,6 +599,7 @@ async function renderAudit(refetch = false) {
   body.push(note);
 
   const groups = [
+    ['duplicate', 'Duplicate — RMS refuses to start on these (the last copy is the one shown)', 'bad'],
     ['missing', 'Missing — in the template, not in the file (RMS default applies)', 'warn'],
     ['unknown', 'Not implemented in RMS — ignored', 'bad'],
     ['disabled', 'Commented out — RMS default applies', ''],
@@ -611,7 +612,7 @@ async function renderAudit(refetch = false) {
     const box = el('div', 'st');
     const head = el('div', 'sth', f.id);
     const counts = groups.map(([k]) => a[k].length);
-    head.append(el('span', 'meta', counts.some(Boolean) ? `${a.missing.length} missing · ${a.unknown.length} unknown · ${a.disabled.length} commented · ${a.extra.length} extra` : ''));
+    head.append(el('span', 'meta', counts.some(Boolean) ? `${a.duplicate.length ? a.duplicate.length + ' duplicate · ' : ''}${a.missing.length} missing · ${a.unknown.length} unknown · ${a.disabled.length} commented · ${a.extra.length} extra` : ''));
     head.append(el('span', 'spacer'));
     if (a.missing.length) {
       const b = el('button', 'small', 'add all missing');
@@ -630,13 +631,14 @@ async function renderAudit(refetch = false) {
         const it = el('div', 'it');
         it.append(el('span', 'sec', `[${d.section}]`));
         const v = k === 'missing' ? d.template_value : d.value;
-        const c = el('code', '', d.name + (v === undefined ? '' : `: ${v}`));
+        const c = el('code', '', d.name + (v === undefined ? '' : `: ${v}`) + (k === 'duplicate' ? `  (×${d.copies})` : ''));
         c.title = (d.help || '') + (k === 'missing' ? `\ntemplate value: ${v}` : '');
         it.append(c);
         let b = null;
         if (k === 'missing') { b = el('button', 'small', 'add'); b.onclick = () => auditAct([[d.section, d.name, { [f.id]: d.template_value }]], `added ${d.name} to ${f.id}`); }
         else if (k === 'unknown') { b = el('button', 'small', 'comment out'); b.onclick = () => auditAct([[d.section, d.name, { [f.id]: null }]], `commented ${d.name} out in ${f.id}`); }
         else if (k === 'disabled') { b = el('button', 'small', 'enable'); b.title = `re-enable with its old value ${d.value}`; b.onclick = () => auditAct([[d.section, d.name, { [f.id]: d.value }]], `enabled ${d.name} in ${f.id}`); }
+        else if (k === 'duplicate') { b = el('button', 'small', 'keep last'); b.title = 'comment out the earlier copies'; b.onclick = () => dedupe(f.id, d.section, d.name); }
         if (b) it.append(b);
         g.append(it);
       }
@@ -679,6 +681,19 @@ async function auditAct(ops, done) {
   }
 }
 
+async function dedupe(station, section, option) {
+  pmsg('writing…', '');
+  try {
+    const r = await fetch('/api/dedupe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ station, section, option }) });
+    const payload = await r.json();
+    if (!r.ok) throw new Error(payload.error || r.statusText);
+    applyState(payload);
+    toast(`${option}: commented out ${payload.result.removed} earlier cop${payload.result.removed === 1 ? 'y' : 'ies'} in ${station}`);
+    renderAudit(true);
+  } catch (e) { pmsg('failed: ' + e.message, 'bad'); }
+}
+
 function renderMigrate() {
   $('ptitle').textContent = 'Migrate to the template layout';
   $('psub').textContent = 'rebuild each file on .configTemplate, carrying your values over';
@@ -706,6 +721,9 @@ function renderMigrate() {
     list.append(box);
   }
   body.push(list);
+  const rec = el('label', 'chip'); const rcb = el('input'); rcb.type = 'checkbox'; rcb.id = 'mig-recent';
+  rec.append(rcb, ' also reset recently changed defaults to the template value (star_catalog_file) — MigrateConfig -r');
+  body.push(rec);
   $('pbody').replaceChildren(...body);
   const prev = el('button', '', 'Preview');
   prev.onclick = () => runMigrate(false);
@@ -727,7 +745,7 @@ async function runMigrate(write) {
   try {
     const r = await fetch('/api/migrate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stations: ids, apply: write }),
+      body: JSON.stringify({ stations: ids, apply: write, recent: !!($('mig-recent') && $('mig-recent').checked) }),
     });
     const payload = await r.json();
     if (!r.ok) throw new Error(payload.error || r.statusText);

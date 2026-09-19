@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,11 +29,13 @@ class Target:
 
 
 def discover(stations_dir: Path = DEFAULT_STATIONS_DIR, rms_dir: Path = DEFAULT_RMS_DIR,
-             extra: list[Path] | None = None) -> list[Target]:
+             extra: list[Path] | None = None, include_root: bool = False) -> list[Target]:
     """One target per ``<stations_dir>/*/.config``; the RMS root config when there are none.
 
     A ``.config`` directly in ``stations_dir`` (the shared base of a layered multicam
-    layout) is listed first, flagged ``shared``.
+    layout) is listed first, flagged ``shared``. ``include_root`` adds the RMS root
+    ``.config`` as a last column even when station folders exist (MigrateConfig always
+    migrates it, since add_GStation copies it to new stations).
     """
     targets: list[Target] = []
     stations_dir = Path(stations_dir).expanduser()
@@ -44,7 +47,7 @@ def discover(stations_dir: Path = DEFAULT_STATIONS_DIR, rms_dir: Path = DEFAULT_
             cfg = d / ".config"
             if cfg.is_file():
                 targets.append(Target(d.name, cfg))
-    if not any(not t.shared for t in targets):
+    if include_root or not any(not t.shared for t in targets):
         root = Path(rms_dir).expanduser() / ".config"
         if root.is_file():
             targets.append(Target("RMS", root))
@@ -205,10 +208,29 @@ class Fleet:
                          for t in self.targets},
         }
 
-    def migrate(self, ids: list[str], apply: bool = False,
+    def dedupe(self, tid: str, section: str, option: str,
+               backup_done: set[str] | None = None, backup: bool = True) -> dict:
+        """Comment out all but the last copy of a duplicated option in one file."""
+        if tid not in self.files:
+            raise KeyError("unknown target: %s" % tid)
+        cf = ConfigFile.load(self.files[tid].path)
+        n = cf.dedupe(section, option)
+        bak = None
+        if n:
+            do_backup = backup and (backup_done is None or tid not in backup_done)
+            bak = cf.save(backup=do_backup)
+            if backup_done is not None:
+                backup_done.add(tid)
+            self.files[tid] = cf
+        return {"removed": n, "backup": None if bak is None else str(bak)}
+
+    def migrate(self, ids: list[str], apply: bool = False, recent: bool = False,
                 backup_done: set[str] | None = None, backup: bool = True) -> dict:
         """Rebuild the given targets on the template layout; write only with ``apply``.
 
+        ``recent`` also resets the options in audit.RECENT_DEFAULTS to the template
+        value (MigrateConfig -r). On apply the log is appended to
+        ``<stationID>_MigrateConfig.log`` beside the file, as MigrateConfig does.
         Returns ``{id: {diff, log, changed, written, backup}}``.
         """
         if self.template is None:
@@ -219,7 +241,7 @@ class Fleet:
         result = {}
         for tid in ids:
             cf = ConfigFile.load(self.files[tid].path)
-            new_lines, log = auditmod.migrate(cf, self.template, self.known)
+            new_lines, log = auditmod.migrate(cf, self.template, self.known, recent=recent)
             # the trailer carries a timestamp; ignore it when deciding "changed"
             changed = [l for l in cf.lines if not l.startswith("; Migrated to the")] != \
                       [l for l in new_lines if not l.startswith("; Migrated to the")]
@@ -235,8 +257,23 @@ class Fleet:
                 entry["written"] = True
                 entry["backup"] = None if bak is None else str(bak)
                 self.files[tid] = cf
+                self._append_migrate_log(cf, log, bak)
             result[tid] = entry
         return result
+
+    @staticmethod
+    def _append_migrate_log(cf: ConfigFile, log: list[str], backup: Path | None) -> None:
+        sid = cf.get("System", "stationID")
+        name = "%s_MigrateConfig.log" % (sid.value if sid and sid.value else cf.path.parent.name)
+        try:
+            with open(cf.path.parent / name, "a", encoding="utf-8") as fh:
+                fh.write("\n=== Migration Log: %s (config-editor) ===\n\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+                fh.write("Input: %s\n" % cf.path)
+                if backup is not None:
+                    fh.write("Backup: %s\n" % backup)
+                fh.write("\n".join("  " + l for l in log) + "\n\nMigration applied successfully.\n")
+        except OSError:
+            pass  # the log is a courtesy; the migration itself already succeeded
 
     # --- editing ---------------------------------------------------------
 

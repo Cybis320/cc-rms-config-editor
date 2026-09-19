@@ -21,10 +21,12 @@ def _add_location_args(p: argparse.ArgumentParser) -> None:
                         "and its ConfigReader.py gives the option types (default: %s)" % DEFAULT_RMS_DIR)
     p.add_argument("--config", type=Path, action="append", default=[], metavar="PATH",
                    help="an extra .config to show as its own column (repeatable)")
+    p.add_argument("--include-root", action="store_true",
+                   help="also show the RMS root .config (the one add_GStation copies) when station folders exist")
 
 
 def _load(args: argparse.Namespace) -> Fleet:
-    targets = discover(args.stations_dir, args.rms_dir, args.config)
+    targets = discover(args.stations_dir, args.rms_dir, args.config, include_root=args.include_root)
     if not targets:
         raise SystemExit("no .config found under %s or %s" % (args.stations_dir, args.rms_dir))
     return Fleet.load(targets, args.rms_dir)
@@ -99,7 +101,8 @@ def cmd_audit(args: argparse.Namespace) -> None:
     rep = fleet.audit()
     print("template:     %s" % (rep["template"] or "NOT FOUND (missing-option checks skipped)"))
     print("ConfigReader: %s" % ("found" if rep["rms_known"] else "NOT FOUND (unknown-option checks skipped)"))
-    labels = [("missing", "MISSING (in the template, not in the file; RMS default applies)"),
+    labels = [("duplicate", "DUPLICATE (RMS refuses to start on these; the last copy is the one shown)"),
+              ("missing", "MISSING (in the template, not in the file; RMS default applies)"),
               ("unknown", "NOT IMPLEMENTED IN RMS (ignored by RMS)"),
               ("disabled", "COMMENTED OUT (RMS default applies)"),
               ("extra", "NOT IN THE TEMPLATE (known to RMS; a migration keeps them)")]
@@ -121,7 +124,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
     fleet = _load(args)
     ids = [t.id for t in fleet.targets if not t.shared] if not args.stations else \
         [s.strip() for s in args.stations.split(",") if s.strip()]
-    result = fleet.migrate(ids, apply=args.apply, backup=not args.no_backup)
+    result = fleet.migrate(ids, apply=args.apply, recent=args.recent, backup=not args.no_backup)
     for tid, r in result.items():
         print("== %s: %s" % (tid, "written" if r["written"] else
                              "would change" if r["changed"] else "already matches the template"))
@@ -182,6 +185,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--stations", help="comma-separated station ids (default: all)")
     p.add_argument("--apply", action="store_true", help="write the files (default: dry run)")
     p.add_argument("--diff", action="store_true", help="print the unified diff per station")
+    p.add_argument("--recent", action="store_true",
+                   help="also reset recently changed defaults (star_catalog_file) to the template value, like MigrateConfig -r")
     p.add_argument("--no-backup", action="store_true", help="skip the .config.bak.<timestamp> snapshot")
     p.set_defaults(func=cmd_migrate)
 
