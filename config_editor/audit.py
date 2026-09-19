@@ -37,6 +37,15 @@ _READER_RE = re.compile(
 # station's value with the template's for these (Utils/MigrateConfig.py recent_defaults_list).
 RECENT_DEFAULTS = {("Calibration", "star_catalog_file")}
 
+# Utils/AuditConfig.OMIT_FROM_CONFIG: read by ConfigReader but deprecated or internal, so
+# never reported as "the template should have this".
+OMIT_FROM_CONFIG = {
+    "lat", "lon", "location", "altitude",          # deprecated DFN station
+    "event_monitor_db_name", "mask", "platepar_name", "mask_remote_name", "remote_mask_dir",
+    "platepar_template_dir", "frame_save_aligned_interval", "log_file_log_level",  # internal
+    "force_v4l2", "brightness", "contrast", "dark_file", "use_dark",               # deprecated
+}
+
 LEGACY_RENAMES = {
     # old option -> (new option, value mapping); MigrateConfig's special case
     "quota_management_disabled": ("quota_management_enabled", {"true": "false", "false": "true"}),
@@ -94,6 +103,24 @@ def audit(station: ConfigFile, template: ConfigFile | None, known: set[str] | No
             out["disabled"].append({"section": sec, "name": key, "key": key, "value": value})
     for lst in out.values():
         lst.sort(key=lambda d: (d["section"], d["key"]))
+    return out
+
+
+def audit_template(template: ConfigFile | None, known: set[str] | None) -> dict:
+    """AuditConfig's --dev report: the template against ConfigReader.py itself.
+
+    ``reader_not_in_template``: options RMS reads that the template does not carry
+    (minus OMIT_FROM_CONFIG and options the template shows commented out).
+    ``template_not_in_reader``: template options nothing in RMS reads any more.
+    """
+    out = {"reader_not_in_template": [], "template_not_in_reader": []}
+    if template is None or known is None:
+        return out
+    tkeys = {k for _, k in template.entries}
+    commented = {k for _, k in template.disabled}
+    out["reader_not_in_template"] = sorted(known - tkeys - commented - OMIT_FROM_CONFIG)
+    out["template_not_in_reader"] = sorted(
+        {e.option for (_, k), e in template.entries.items() if k not in known})
     return out
 
 

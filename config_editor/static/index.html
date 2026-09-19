@@ -597,6 +597,23 @@ async function renderAudit(refetch = false) {
   note.append(' · ConfigReader.py: ' + (rep.rms_known ? 'found' : 'not found — unknown-option checks skipped'));
   body.push(note);
 
+  const ta = rep.template_audit || {};
+  if ((ta.reader_not_in_template || []).length || (ta.template_not_in_reader || []).length) {
+    const box = el('div', 'st');
+    const head = el('div', 'sth', '.configTemplate vs ConfigReader.py');
+    head.append(el('span', 'meta', 'developer view — AuditConfig --dev, same omit list'));
+    box.append(head);
+    for (const [k, label] of [['reader_not_in_template', 'Read by RMS but not in the template (deprecated / internal ones omitted)'],
+                              ['template_not_in_reader', 'In the template but not read by RMS']]) {
+      if (!(ta[k] || []).length) continue;
+      const g = el('div', 'grp');
+      g.append(el('h4', 'warn', label));
+      for (const name of ta[k]) { const it = el('div', 'it'); it.append(el('span', 'sec', ''), el('code', '', name)); g.append(it); }
+      box.append(g);
+    }
+    body.push(box);
+  }
+
   const groups = [
     ['duplicate', 'Duplicate — RMS refuses to start on these (the last copy is the one shown)', 'bad'],
     ['missing', 'Missing — in the template, not in the file (RMS default applies)', 'warn'],

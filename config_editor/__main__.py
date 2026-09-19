@@ -106,6 +106,18 @@ def cmd_audit(args: argparse.Namespace) -> None:
               ("unknown", "NOT IMPLEMENTED IN RMS (ignored by RMS)"),
               ("disabled", "COMMENTED OUT (RMS default applies)"),
               ("extra", "NOT IN THE TEMPLATE (known to RMS; a migration keeps them)")]
+    ta = rep["template_audit"]
+    if ta["reader_not_in_template"] or ta["template_not_in_reader"]:
+        print()
+        print("== .configTemplate vs ConfigReader.py (developer view)")
+        if ta["reader_not_in_template"]:
+            print("   READ BY RMS BUT NOT IN THE TEMPLATE (deprecated/internal ones omitted)")
+            for k in ta["reader_not_in_template"]:
+                print("     %s" % k)
+        if ta["template_not_in_reader"]:
+            print("   IN THE TEMPLATE BUT NOT READ BY RMS")
+            for k in ta["template_not_in_reader"]:
+                print("     %s" % k)
     for tid, a in rep["stations"].items():
         print()
         print("== %s" % tid)

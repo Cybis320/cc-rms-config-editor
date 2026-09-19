@@ -1,6 +1,6 @@
 import pytest
 
-from config_editor.audit import audit, migrate, unified_diff
+from config_editor.audit import audit, audit_template, migrate, unified_diff
 from config_editor.configfile import ConfigFile
 
 TEMPLATE = """; template header
@@ -309,3 +309,15 @@ def test_fleet_include_root_and_migrate_log(tmp_path):
     log = (root / "US005A" / "US005A_MigrateConfig.log").read_text()
     assert "Migration Log" in log and "kept '33.58'" in log and "applied successfully" in log
     assert (rms / "XX0001_MigrateConfig.log").exists()
+
+
+def test_audit_template_dev_report(files):
+    _, template = files
+    known = KNOWN | {"hot_pixels_file", "mask", "brightness", "public_latitude"}
+    ta = audit_template(template, known)
+    # mask/brightness are on the omit list; public_latitude is commented out in the template
+    assert ta["reader_not_in_template"] == ["hot_pixels_file", "meteor_color", "star_gate_factor"]
+    assert ta["template_not_in_reader"] == []
+    ta = audit_template(template, KNOWN - {"fps"})
+    assert ta["template_not_in_reader"] == ["fps"]
+    assert audit_template(None, KNOWN) == {"reader_not_in_template": [], "template_not_in_reader": []}

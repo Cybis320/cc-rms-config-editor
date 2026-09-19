@@ -206,6 +206,7 @@ class Fleet:
             "rms_known": self.known is not None,
             "stations": {t.id: auditmod.audit(self.files[t.id], self.template, self.known)
                          for t in self.targets},
+            "template_audit": auditmod.audit_template(self.template, self.known),
         }
 
     def dedupe(self, tid: str, section: str, option: str,

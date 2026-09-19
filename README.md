@@ -134,6 +134,11 @@ station at once and makes each finding actionable:
 | **Not in the template** | RMS knows it but the template lacks it (an alpha feature, say); a migration keeps it | — |
 | **Duplicate** | the same option twice in one section — RMS's strict parser refuses to start; the last copy is the one shown and edited | *keep last* (comments the earlier copies out) |
 
+A last block is AuditConfig's `--dev` report: options `ConfigReader.py` reads
+that the template does not carry (with AuditConfig's list of deprecated and
+internal options omitted, and template options that are shown commented out
+ignored), and template options RMS no longer reads.
+
 ## Migrate
 
 The **Migrate** button does what `python -m Utils.MigrateConfig -u` does,
