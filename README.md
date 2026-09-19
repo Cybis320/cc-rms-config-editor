@@ -102,10 +102,12 @@ old value after a `;`.
 
 Click a row to edit. The drawer shows the comment from the config as help, the
 type RMS will read the value as, and one input per station. Type a value into
-**value for every station** and *Apply to all* (or just press Enter there) to
-set it everywhere, or edit stations individually. **unset** comments the option
-out in that file. Values that RMS could not parse as the expected type are
-flagged but not blocked. Enter saves, Esc closes.
+**value for every station** and *Fill every station* to put it in every box,
+or edit stations individually; **unset** marks a box for commenting out. Boxes
+only stage the change: the footer counts what is pending, and nothing is
+written until **Save to files** (Enter). Pressing Enter in the fill box does
+both at once. Values that RMS could not parse as the expected type are flagged
+but not blocked. Esc closes.
 
 Only the lines that actually change are rewritten; comments, ordering and
 everything else in the file are preserved byte for byte. An option that is

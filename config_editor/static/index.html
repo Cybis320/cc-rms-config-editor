@@ -115,6 +115,7 @@
   .dmsg { font-size: 12px; color: var(--muted); }
   .dmsg.bad { color: var(--bad); }
   .dmsg.ok { color: var(--ok); }
+  .dmsg.pend { color: var(--warn); }
   #dhelp {
     white-space: pre-wrap; color: var(--muted); font-size: 12.5px; background: var(--bg);
     border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; max-height: 32vh; overflow: auto;
@@ -199,16 +200,16 @@
     <div id="dhelp"></div>
     <div class="tplline" id="dtpl" style="display:none">
       <span>template:</span> <code id="dtplv"></code>
-      <button class="small" id="dtpl-use">use for every station</button>
+      <button class="small" id="dtpl-use" title="fill every station with the template value — nothing is written until Save">fill every station with it</button>
     </div>
     <div class="setall">
-      <input type="text" id="setall" placeholder="value for every station">
-      <button id="setall-btn">Apply to all</button>
+      <input type="text" id="setall" placeholder="value for every station (Enter = fill + save)">
+      <button id="setall-btn" title="fill the boxes below with this value — nothing is written until Save">Fill every station ↓</button>
     </div>
     <div id="rows"></div>
   </div>
   <div class="dfoot">
-    <button class="primary" id="dsave">Save (Enter)</button>
+    <button class="primary" id="dsave">Save to files (Enter)</button>
     <button id="drevert">Revert</button>
     <span class="dmsg" id="dmsg"></span>
   </div>
@@ -486,7 +487,9 @@ function refreshRow(div) {
   const w = unset ? '' : typeWarning(inp.value, editing.type);
   div.querySelector('.warn').textContent = changed ? w : '';
   inp.classList.toggle('bad', changed && !!w);
-  dirtyDrawer = [...$('rows').querySelectorAll('input')].some((i) => i.classList.contains('changed'));
+  const pending = [...$('rows').querySelectorAll('input')].filter((i) => i.classList.contains('changed')).length;
+  dirtyDrawer = pending > 0;
+  setMsg(pending ? `${pending} of ${files.length} changed — not written until you Save` : '', pending ? 'pend' : '');
 }
 
 function applyAll(v) {
