@@ -124,6 +124,13 @@ def test_migrate(files):
     assert any("DROPPED" in l and "old_bogus_option" in l for l in log)
     assert any("legacy option renamed" in l for l in log)
     assert any("kept '24.98'" in l for l in log)
+    # a template option that was commented out comes back with the template value, and says so
+    station2 = ConfigFile(path=station.path,
+                          lines=[l if l != "latitude: 33.58" else "latitude: 33.58\n; flux_stage_slots: 9" for l in station.lines])
+    station2.lines = "\n".join(station2.lines).split("\n")
+    station2._index()
+    _, log2 = migrate(station2, template, KNOWN)
+    assert any("flux_stage_slots: was commented out (9) => template value '2' now applies" in l for l in log2)
     # idempotent: migrating the result changes nothing but the trailer
     again, _ = migrate(cf, template, KNOWN)
     strip = lambda ls: [l for l in ls if not l.startswith("; Migrated to the")]
@@ -200,7 +207,7 @@ DUP = """[Capture]
 fps: 25
 ; a comment
 fps: 24.98
-quota_management_disabled: true
+quota_management_disabled: false
 quota_management_enabled: false
 
 [Calibration]
@@ -234,9 +241,9 @@ def test_migrate_dedupes_legacy_both_present_and_recent(tmp_path):
     new, log = migrate(cf, tpl, known)
     text = "\n".join(new)
     assert text.count("\nfps:") == 1 and "fps: 24.98" in text
-    # the file already had the new option: the legacy one is dropped, not converted
-    assert "quota_management_enabled: false" in text and "quota_management_disabled" not in text
-    assert any("superseded by quota_management_enabled" in l for l in log)
+    # both present: ConfigReader reads the legacy option last, so its value is what ran
+    assert "quota_management_enabled: true" in text and "quota_management_disabled" not in text
+    assert any("took precedence at runtime" in l for l in log)
     assert any("2 copies" in l and "fps" in l for l in log)
     assert "star_catalog_file: BSC5" in text                         # kept without --recent
     new, log = migrate(cf, tpl, known, recent=True)

@@ -145,10 +145,19 @@ def migrate(station: ConfigFile, template: ConfigFile, known: set[str] | None,
             if key != old:
                 continue
             _, v = values.pop((sec, key))
-            if (sec, new) in values:
-                log.append("[%s] %s: %s => DROPPED (superseded by %s: %s)" % (sec, old, v, new, values[(sec, new)][1]))
-                continue
             nv = "false" if _truthy(v) else "true" if old.endswith("disabled") else mapping.get(v.lower(), v)
+            if (sec, new) in values:
+                # ConfigReader reads the legacy option AFTER the new one, so at runtime the
+                # legacy value wins; carry that effective value over (MigrateConfig keeps the
+                # new option's value here, which can silently flip the setting).
+                cur = values[(sec, new)][1]
+                if cur.strip().lower() == nv:
+                    log.append("[%s] %s: %s => DROPPED (agrees with %s: %s)" % (sec, old, v, new, cur))
+                else:
+                    values[(sec, new)] = (new, nv)
+                    log.append("[%s] %s: %s => DROPPED; %s: %s -> %s (the legacy option took "
+                               "precedence at runtime)" % (sec, old, v, new, cur, nv))
+                continue
             values[(sec, new)] = (new, nv)
             log.append("[%s] %s: %s -> %s: %s (legacy option renamed)" % (sec, old, v, new, nv))
     if recent:
@@ -181,6 +190,9 @@ def migrate(station: ConfigFile, template: ConfigFile, known: set[str] | None,
                     log.append("[%s] %s: template default %r => kept %r" % (section, m.group(1), tval, sval))
                     kept += 1
                     continue
+            elif key in station.disabled:
+                log.append("[%s] %s: was commented out (%s) => template value %r now applies"
+                           % (section, m.group(1), station.disabled[key], tval))
             out.append(line)
             continue
         out.append(line)

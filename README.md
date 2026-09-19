@@ -156,6 +156,14 @@ A second migration of an up-to-date file is a no-op. The *recently changed
 defaults* checkbox is MigrateConfig's `-r`: it resets `star_catalog_file` to
 the template value as well.
 
+Where the result differs from MigrateConfig, it is deliberate and follows what
+RMS actually does at runtime: option names are matched case-insensitively as
+`ConfigReader` reads them (MigrateConfig would reset an `ELEVATION:` line to the
+template default), and when both `quota_management_disabled` and
+`quota_management_enabled` are present the legacy value is carried over because
+ConfigReader reads it last. `scripts/compare_with_rms.py` runs both tools over
+a set of edge cases and reports every difference.
+
 MigrateConfig also migrates the RMS root `.config` (the one `add_GStation`
 copies to new stations). Start the editor with `--include-root` to get it as an
 extra *RMS* column and include it in audits and migrations.
