@@ -124,13 +124,21 @@ def test_migrate(files):
     assert any("DROPPED" in l and "old_bogus_option" in l for l in log)
     assert any("legacy option renamed" in l for l in log)
     assert any("kept '24.98'" in l for l in log)
-    # a template option that was commented out comes back with the template value, and says so
+    # a template option the station has commented out stays commented out, with its old value
     station2 = ConfigFile(path=station.path,
                           lines=[l if l != "latitude: 33.58" else "latitude: 33.58\n; flux_stage_slots: 9" for l in station.lines])
     station2.lines = "\n".join(station2.lines).split("\n")
     station2._index()
-    _, log2 = migrate(station2, template, KNOWN)
-    assert any("flux_stage_slots: was commented out (9) => template value '2' now applies" in l for l in log2)
+    new2, log2 = migrate(station2, template, KNOWN)
+    assert "; flux_stage_slots: 9" in new2 and "flux_stage_slots: 2" not in new2
+    assert any("flux_stage_slots: kept commented out (; 9); template has '2'" in l for l in log2)
+    cf2 = ConfigFile(path=station.path, lines=new2)
+    cf2._index()
+    assert cf2.get("System", "flux_stage_slots") is None
+    assert "flux_stage_slots" not in [d["key"] for d in audit(cf2, template, KNOWN)["missing"]]
+    assert "flux_stage_slots" in [d["key"] for d in audit(cf2, template, KNOWN)["disabled"]]
+    again, _ = migrate(cf2, template, KNOWN)
+    assert "; flux_stage_slots: 9" in again
     # idempotent: migrating the result changes nothing but the trailer
     again, _ = migrate(cf, template, KNOWN)
     strip = lambda ls: [l for l in ls if not l.startswith("; Migrated to the")]

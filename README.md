@@ -144,7 +144,8 @@ ignored), and template options RMS no longer reads.
 The **Migrate** button does what `python -m Utils.MigrateConfig -u` does,
 per station and with a preview: each file is rebuilt on the template's layout
 (its comments, ordering and new options), every value you changed from the
-template default is carried over, options RMS knows but the template lacks are
+template default is carried over, options you commented out stay commented
+out, options RMS knows but the template lacks are
 appended to their section under a marker comment, unknown options are dropped
 and listed, and the legacy `quota_management_disabled` is folded into
 `quota_management_enabled` (or dropped when the new option is already there).
@@ -161,8 +162,10 @@ RMS actually does at runtime: option names are matched case-insensitively as
 `ConfigReader` reads them (MigrateConfig would reset an `ELEVATION:` line to the
 template default), and when both `quota_management_disabled` and
 `quota_management_enabled` are present the legacy value is carried over because
-ConfigReader reads it last. `scripts/compare_with_rms.py` runs both tools over
-a set of edge cases and reports every difference.
+ConfigReader reads it last. An option you commented out stays commented out,
+with its old value, so RMS keeps using its built-in default (MigrateConfig
+re-enables it with the template value). `scripts/compare_with_rms.py` runs
+both tools over a set of edge cases and reports every difference.
 
 MigrateConfig also migrates the RMS root `.config` (the one `add_GStation`
 copies to new stations). Start the editor with `--include-root` to get it as an
