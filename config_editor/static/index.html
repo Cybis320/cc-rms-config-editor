@@ -154,6 +154,11 @@
     display: none; padding: 6px 16px; background: rgba(210,153,34,.15); border-bottom: 1px solid var(--warn); font-size: 12.5px;
   }
   #banner.show { display: block; }
+  #checks:empty { display: none; }
+  #checks { padding: 6px 16px; background: rgba(248,81,73,.12); border-bottom: 1px solid var(--bad); font-size: 12.5px; }
+  #checks div { padding: 2px 0; }
+  #checks b { color: var(--bad); }
+  #checks a { color: var(--accent); margin-left: 6px; }
   #toast {
     position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 20;
     background: #1f6feb; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px;
@@ -178,6 +183,7 @@
   <button id="migrate-btn">Migrate</button>
   <button id="reload">Reload</button>
 </header>
+<div id="checks"></div>
 <div id="banner">Config files changed on disk — <a href="#" id="banner-reload" style="color:var(--accent)">reload</a> to see the latest values.</div>
 
 <div id="layout">
@@ -262,7 +268,19 @@ function applyState(payload) {
   state = payload;
   files = payload.files;
   $('chip-nt').style.display = state.template ? '' : 'none';
+  renderChecks();
   render();
+}
+
+function renderChecks() {
+  $('checks').replaceChildren(...(state.checks || []).map((c) => {
+    const d = el('div');
+    d.append(el('b', '', c.station + ': '), c.message);
+    const a = el('a', '', 'edit ' + c.option); a.href = '#';
+    a.onclick = (e) => { e.preventDefault(); const row = findRow(c.section, c.option.toLowerCase()); if (row) openEditor(c.section, row); };
+    d.append(a);
+    return d;
+  }));
 }
 
 // Poll for changes on disk; never yank the table out from under an open editor.

@@ -193,9 +193,47 @@ class Fleet:
         return {
             "files": files,
             "sections": out_sections,
+            "checks": self.checks(),
             "template": None if self.template is None else str(self.template_path),
             "rms_known": self.known is not None,
         }
+
+    # --- cross-option sanity checks --------------------------------------
+
+    def checks(self) -> list[dict]:
+        """Combinations RMS accepts but that misbehave at runtime, per station.
+
+        Mirrors RMS.DeleteOldObservations: with quota management on, the captured
+        directories get rms_data_quota minus the archive, bz2, continuous-capture and
+        log quotas; at or below zero RMS logs "No quota allocation remains" and stops
+        managing CapturedFiles by quota.
+        """
+        out = []
+        for t in self.targets:
+            cf = self.files[t.id]
+
+            def val(opt, default=None):
+                e = cf.get("Capture", opt)
+                return e.value if e is not None and e.value != "" else default
+
+            enabled = str(val("quota_management_enabled", "false")).strip().lower() in ("1", "true", "yes", "on")
+            if not enabled:
+                continue
+            try:
+                parts = {k: float(val(k)) for k in ("rms_data_quota", "arch_dir_quota", "bz2_files_quota",
+                                                    "continuous_capture_quota", "log_files_quota")
+                         if val(k) is not None}
+            except ValueError:
+                continue
+            if "rms_data_quota" not in parts:
+                continue
+            left = parts["rms_data_quota"] - sum(v for k, v in parts.items() if k != "rms_data_quota")
+            if left <= 0:
+                out.append({"station": t.id, "option": "rms_data_quota", "section": "Capture",
+                            "message": "no quota left for captured directories: rms_data_quota %g minus the "
+                                       "archive, bz2, continuous-capture and log quotas leaves %g GB (RMS will "
+                                       "warn and stop managing CapturedFiles by quota)" % (parts["rms_data_quota"], left)})
+        return out
 
     # --- audit / migrate -------------------------------------------------
 

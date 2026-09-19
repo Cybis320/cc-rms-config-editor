@@ -50,6 +50,8 @@ def cmd_list(args: argparse.Namespace) -> None:
     fleet = _load(args)
     m = fleet.matrix()
     ids = [f["id"] for f in m["files"]]
+    for c in m["checks"]:
+        print("WARNING %s: %s" % (c["station"], c["message"]))
     print("%-32s %s" % ("option", "  ".join(ids)))
     for sec in m["sections"]:
         rows = sec["options"]
@@ -94,6 +96,8 @@ def cmd_set(args: argparse.Namespace) -> None:
         state = "written" if i in result["written"] else "unchanged"
         bak = result["backups"].get(i)
         print("%-10s %s%s" % (i, state, ("  (backup: %s)" % bak) if bak else ""))
+    for c in fleet.checks():
+        print("WARNING %s: %s" % (c["station"], c["message"]))
 
 
 def cmd_audit(args: argparse.Namespace) -> None:

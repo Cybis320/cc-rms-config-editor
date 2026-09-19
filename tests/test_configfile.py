@@ -232,3 +232,19 @@ def test_check_value():
     assert check_value("maybe", "bool")
     assert check_value("anything", None) is None
     assert check_value("", "int") is None
+
+
+def test_quota_check(tmp_path):
+    root = tmp_path / "Stations"
+    (root / "XX0001").mkdir(parents=True)
+    (root / "XX0001" / ".config").write_text(
+        "[System]\nstationID: XX0001\n[Capture]\nquota_management_enabled: true\nrms_data_quota: 965\n"
+        "arch_dir_quota: 10\nbz2_files_quota: 10\ncontinuous_capture_quota: 965\nlog_files_quota: 0.2\n")
+    fleet = Fleet.load(discover(root, tmp_path / "no-rms"), tmp_path / "no-rms")
+    checks = fleet.matrix()["checks"]
+    assert len(checks) == 1 and checks[0]["station"] == "XX0001" and "-20.2 GB" in checks[0]["message"]
+    fleet.apply("Capture", "continuous_capture_quota", {"XX0001": "680"}, backup=False)
+    assert fleet.checks() == []
+    fleet.apply("Capture", "quota_management_enabled", {"XX0001": "false"}, backup=False)
+    fleet.apply("Capture", "continuous_capture_quota", {"XX0001": "965"}, backup=False)
+    assert fleet.checks() == []   # quota management off: RMS never looks at the split
