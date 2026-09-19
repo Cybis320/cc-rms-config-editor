@@ -11,6 +11,7 @@
     --ok: #3fb950; --warn: #d29922; --bad: #f85149;
     --same-bg: rgba(63,185,80,.06); --vary-bg: rgba(210,153,34,.10); --miss-bg: rgba(248,81,73,.08);
   }
+  :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
@@ -85,7 +86,7 @@
   .tag.same { color: var(--ok); border: 1px solid rgba(63,185,80,.45); }
   .tag.vary { color: var(--warn); border: 1px solid rgba(210,153,34,.6); }
   .tag.miss { color: var(--bad); border: 1px solid rgba(248,81,73,.5); }
-  td.val { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  td.val { font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 12.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   tr.same td.val { color: var(--muted); }
   tr.same td.val.first { color: var(--text); }
   tr.vary td.val { background: var(--vary-bg); }
@@ -180,6 +181,7 @@
 <div id="toast"></div>
 
 <script>
+const INITIAL_STATE = /*__STATE__*/null;  // injected by the server
 const POLL_MS = 5000;
 let state = null;          // last /api/state payload
 let files = [];            // state.files
@@ -487,8 +489,19 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('beforeunload', (e) => { if (dirtyDrawer) { e.preventDefault(); e.returnValue = ''; } });
 
-current = localStorage.getItem('cfg.section') || 'all';
-load();
+// Deep links: #section=Capture  #edit=System.elevation  #vary=1
+const hash = new URLSearchParams(location.hash.slice(1));
+current = hash.get('section') || localStorage.getItem('cfg.section') || 'all';
+if (hash.get('vary')) $('only-vary').checked = true;
+if (INITIAL_STATE) {
+  apply(INITIAL_STATE);
+  $('status').textContent = `${files.length} configs · loaded ${new Date().toLocaleTimeString()} · v${state.version}`;
+} else load();
+if (hash.get('edit') && state) {
+  const [sec, key] = hash.get('edit').split('.');
+  const row = findRow(sec, (key || '').toLowerCase());
+  if (row) openEditor(sec, row);
+}
 setInterval(poll, POLL_MS);
 </script>
 </body>

@@ -34,7 +34,7 @@ class EditorHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/":
-                self._send_static("index.html", "text/html; charset=utf-8")
+                self._send_page()
             elif path == "/api/state":
                 self._send_state()
             else:
@@ -70,6 +70,17 @@ class EditorHandler(BaseHTTPRequestHandler):
         payload = self.fleet.matrix()
         payload["version"] = self.version
         return payload
+
+    def _send_page(self) -> None:
+        """index.html with the current state embedded, so the first paint is complete."""
+        target = STATIC_DIR / "index.html"
+        with self.lock:
+            payload = self._state_payload()
+        # "</" must not appear inside the inline script; JSON allows the escape.
+        blob = json.dumps(payload).replace("</", "<\\/")
+        html = target.read_text(encoding="utf-8").replace(
+            "/*__STATE__*/null", blob, 1)
+        self._respond(200, "text/html; charset=utf-8", html.encode("utf-8"))
 
     def _send_state(self) -> None:
         with self.lock:
