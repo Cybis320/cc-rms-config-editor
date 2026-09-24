@@ -9,7 +9,7 @@ the elevation.
 ## Install (one command)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-config-editor/master/scripts/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cybis320/cc-rms-config-editor/master/install.sh | bash
 ```
 
 Clones (or updates) the repo into `~/source/CC_Utils/config_editor`, installs
@@ -17,8 +17,13 @@ the package into the RMS virtualenv at `~/vRMS` (or a local `.venv` if there
 isn't one), and puts an **RMS Config Editor** icon on the Desktop and in the app
 menu. Idempotent — re-run the same command any time.
 
+Updates install themselves: the installer schedules the shared hourly
+[cc-utils](cc-utils/README.md) updater (one crontab line, tagged
+`# cc-utils-update`). The older one-liner that curled `scripts/deploy.sh` still
+works.
+
 Overridable via environment: `CC_DEST` (checkout location), `CC_VENV`
-(virtualenv to install into), `CC_REPO_URL`.
+(virtualenv to install into), `CC_REPO_URL`, `CC_NO_AUTOUPDATE=1`.
 
 To uninstall:
 

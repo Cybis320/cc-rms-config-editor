@@ -4,8 +4,9 @@
 #
 # Self-update: before starting, the checkout is fast-forwarded from GitHub
 # (best effort, a few seconds at most, silently skipped offline). If that
-# brought new code while a server was already running, the server is restarted
-# so the update takes effect immediately. Set CC_NO_SELFUPDATE=1 to skip.
+# or the hourly cc-utils updater brought new code while a server was already
+# running, the server is restarted so the update takes effect. Set
+# CC_NO_SELFUPDATE=1 to skip the pull.
 
 set -euo pipefail
 
@@ -32,13 +33,19 @@ if [ "${CC_NO_SELFUPDATE:-0}" != "1" ] && [ -d "$PROJECT_DIR/.git" ]; then
         after="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
         if [ -n "$before" ] && [ "$before" != "$after" ]; then
             echo "$(date -Is) updated $before -> $after" >>"$LOG"
-            if is_up; then
-                pkill -f "$MATCH" 2>/dev/null || true
-                for _ in $(seq 20); do is_up || break; sleep 0.2; done
-            fi
             notify "Updated to $(git -C "$PROJECT_DIR" log -1 --format='%h (%cs)')"
         fi
     fi
+fi
+
+# A server started before an update (the launcher's pull above or the hourly
+# cc-utils updater) keeps running the old code: restart it once the checkout
+# has moved past the commit it started on.
+REV_FILE="${LOG%.log}.rev"
+HEAD_REV="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
+if [ -n "$HEAD_REV" ] && is_up && [ "$(cat "$REV_FILE" 2>/dev/null || true)" != "$HEAD_REV" ]; then
+    pkill -f "$MATCH" 2>/dev/null || true
+    for _ in $(seq 20); do is_up || break; sleep 0.2; done
 fi
 
 # Prefer the interpreter deploy.sh installed into; plain python3 works too
@@ -59,6 +66,7 @@ if ! is_up; then
     cd "$PROJECT_DIR"
     nohup "$PYTHON" -m config_editor --port "$PORT" >>"$LOG" 2>&1 &
     disown
+    printf '%s\n' "$HEAD_REV" >"$REV_FILE"
 
     # Give it a moment to bind before pointing a browser at it.
     for _ in $(seq 30); do
