@@ -268,6 +268,8 @@ _SESSION_RE = re.compile(r"_(\d{8})_(\d{6})")
 MEASURE_CACHE = Path(os.environ.get("CONFIG_EDITOR_MEASURED") or
                      (Path.home() / ".local" / "state" / "config-editor" / "measured.json"))
 MEASURE_TTL = 6 * 3600
+# Bump when measure() learns a new size: older cached results lack it and would read as 0
+MEASURE_VERSION = 2
 _measured: dict | None = None     # "data_dir|stationID" -> {"at": epoch, "sizes": {...}}
 _measuring = threading.Lock()
 
@@ -430,10 +432,14 @@ def _jobs(fleet) -> list[tuple[str, str, str, dict]]:
     return jobs
 
 
+def _current(entry) -> bool:
+    return bool(entry) and entry.get("v") == MEASURE_VERSION
+
+
 def stale(fleet) -> bool:
     cache = _cache()
     now = time.time()
-    return any(k not in cache or now - cache[k]["at"] > MEASURE_TTL for k, *_ in _jobs(fleet))
+    return any(not _current(cache.get(k)) or now - cache[k]["at"] > MEASURE_TTL for k, *_ in _jobs(fleet))
 
 
 def measuring() -> bool:
@@ -447,7 +453,7 @@ def measure_all(fleet) -> None:
     try:
         cache = _cache()
         for key, data_dir, sid, dirs in _jobs(fleet):
-            cache[key] = {"at": time.time(), "sizes": measure(data_dir, sid, dirs)}
+            cache[key] = {"at": time.time(), "v": MEASURE_VERSION, "sizes": measure(data_dir, sid, dirs)}
         try:
             MEASURE_CACHE.parent.mkdir(parents=True, exist_ok=True)
             MEASURE_CACHE.write_text(json.dumps(cache), encoding="utf-8")
@@ -494,6 +500,8 @@ def sim_inputs(fleet, disk=disk_of) -> dict:
         settings = {k: _parse(raw(k), d) for k, d in SIM_OPTIONS.items()}
         present = {k: raw(k) is not None for k in SIM_OPTIONS}
         hit = cache.get(jobs[t.id][0])
+        if not _current(hit):
+            hit = None        # measured by an older version: missing sizes would read as 0
         d = disk(s["data_dir"])
         key = d["key"] if d else ("?", s["data_dir"])
         g = groups.setdefault(key, {"mount": d["mount"] if d else None,

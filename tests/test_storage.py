@@ -172,3 +172,18 @@ def test_sim_inputs_and_background_measure(tmp_path, monkeypatch):
     r = storage.sim_inputs(fleet, disk)
     assert r["disks"][0]["stations"][0]["measured"] is not None
     assert (tmp_path / "measured.json").is_file()
+
+
+def test_old_measurements_are_not_used(tmp_path, monkeypatch):
+    """A cache written before a size was measured must not feed the page zeros."""
+    fleet, disk = fleet_of(tmp_path, n=1)
+    key = storage._jobs(fleet)[0][0]
+    cache = tmp_path / "measured.json"
+    cache.write_text(json.dumps({key: {"at": __import__("time").time(), "sizes": {"captured_gb": 30.0}}}))
+    monkeypatch.setattr(storage, "MEASURE_CACHE", cache)
+    monkeypatch.setattr(storage, "_measured", None)
+    assert storage.stale(fleet)
+    assert storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]["measured"] is None
+    storage.measure_all(fleet)
+    assert not storage.stale(fleet)
+    assert "stills_gb_per_hour" in storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]["measured"]
