@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import audit as auditmod
+from . import storage
 from .configfile import ConfigFile
 
 DEFAULT_STATIONS_DIR = Path.home() / "source" / "Stations"
@@ -220,7 +221,8 @@ class Fleet:
         Mirrors RMS.DeleteOldObservations: with quota management on, the captured
         directories get rms_data_quota minus the archive, bz2, continuous-capture and
         log quotas; at or below zero RMS logs "No quota allocation remains" and stops
-        managing CapturedFiles by quota.
+        managing CapturedFiles by quota. Plus storage.checks: disks the stations on
+        them cannot fit on together.
         """
         out = []
         for t in self.targets:
@@ -247,7 +249,7 @@ class Fleet:
                             "message": "no quota left for captured directories: rms_data_quota %g minus the "
                                        "archive, bz2, continuous-capture and log quotas leaves %g GB (RMS will "
                                        "warn and stop managing CapturedFiles by quota)" % (parts["rms_data_quota"], left)})
-        return out
+        return out + storage.checks(self)
 
     # --- audit / migrate -------------------------------------------------
 

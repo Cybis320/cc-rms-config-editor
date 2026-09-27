@@ -147,6 +147,14 @@
   .clean { color: var(--ok); font-size: 12.5px; padding: 8px 12px; }
   pre.diff { font: 11.5px/1.35 ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 50vh; margin: 6px 0 0; white-space: pre; }
   pre.diff .a { color: var(--ok); } pre.diff .d { color: var(--bad); } pre.diff .h { color: var(--accent); }
+  table.stor { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  table.stor th, table.stor td { padding: 4px 8px; border-top: 1px solid var(--line2); text-align: right; white-space: nowrap; }
+  table.stor th { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+  table.stor th:first-child, table.stor td:first-child { text-align: left; }
+  table.stor input { width: 64px; text-align: right; }
+  table.stor td.warn { color: var(--warn); } table.stor td.bad { color: var(--bad); }
+  .fit { padding: 8px 12px; border-top: 1px solid var(--line2); font-size: 12.5px; }
+  .fit b.ok { color: var(--ok); } .fit b.bad { color: var(--bad); }
   ul.log { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); max-height: 30vh; overflow: auto; }
   ul.log li.drop { color: var(--bad); }
   .note { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
@@ -182,6 +190,7 @@
   <span class="spacer"></span>
   <span class="meta" id="status">loading…</span>
   <button id="audit-btn" title="which options are missing vs. the template, unknown to RMS, commented out or duplicated — per station">Audit</button>
+  <button id="storage-btn" title="what the quotas hold at each station's declared bitrate, and whether the stations sharing a disk fit on it">Storage</button>
   <button id="migrate-btn">Migrate</button>
   <button id="reload">Reload</button>
 </header>
@@ -242,7 +251,7 @@ let files = [];            // state.files
 let current = 'all';       // section name or 'all'
 let editing = null;        // {section, option, key, type, row}
 let dirtyDrawer = false;
-let panelMode = null;      // 'audit' | 'migrate' | null
+let panelMode = null;      // 'audit' | 'migrate' | 'storage' | null
 
 const $ = (id) => document.getElementById(id);
 const nav = $('nav'), main = $('main');
@@ -278,8 +287,12 @@ function renderChecks() {
   $('checks').replaceChildren(...(state.checks || []).map((c) => {
     const d = el('div');
     d.append(el('b', '', c.station + ': '), c.message);
-    const a = el('a', '', 'edit ' + c.option); a.href = '#';
-    a.onclick = (e) => { e.preventDefault(); const row = findRow(c.section, c.option.toLowerCase()); if (row) openEditor(c.section, row); };
+    const a = el('a', '', c.panel ? 'open ' + c.panel : 'edit ' + c.option); a.href = '#';
+    a.onclick = (e) => {
+      e.preventDefault();
+      if (c.panel) { openPanel(c.panel); return; }
+      const row = findRow(c.section, c.option.toLowerCase()); if (row) openEditor(c.section, row);
+    };
     d.append(a);
     return d;
   }));
@@ -580,7 +593,7 @@ function openPanel(mode) {
   if (editing) closeEditor();
   panelMode = mode;
   panel.classList.add('open');
-  if (mode === 'audit') renderAudit(); else renderMigrate();
+  if (mode === 'audit') renderAudit(); else if (mode === 'storage') renderStorage(); else renderMigrate();
 }
 function closePanel() {
   if (!panelMode) return;
@@ -591,6 +604,7 @@ function closePanel() {
 $('pclose').onclick = closePanel;
 $('audit-btn').onclick = () => openPanel('audit');
 $('migrate-btn').onclick = () => openPanel('migrate');
+$('storage-btn').onclick = () => openPanel('storage');
 
 function pmsg(text, cls) {
   let m = $('pfoot').querySelector('.dmsg');
@@ -715,7 +729,7 @@ async function auditAct(ops, done) {
   try {
     for (const [sec, opt, vals] of merged.values()) await apiSet(sec, opt, vals);
     toast(done);
-    renderAudit(true);
+    if (panelMode === 'storage') renderStorage(); else renderAudit(true);
   } catch (e) {
     pmsg('failed: ' + (e.conflict ? 'file changed on disk, reloaded — try again' : e.message), 'bad');
   }
@@ -819,6 +833,135 @@ async function runMigrate(write) {
   }
 }
 
+// --- storage panel ---------------------------------------------------------
+
+const gb = (v) => v == null ? '–' : Math.round(v).toLocaleString('en-US');
+
+async function renderStorage() {
+  $('ptitle').textContent = 'Storage';
+  $('psub').textContent = 'what the quotas hold at each station\'s declared bitrate, per disk';
+  $('pbody').replaceChildren(el('div', 'note', 'loading…'));
+  $('pfoot').replaceChildren();
+  let rep;
+  try {
+    const r = await fetch('/api/storage', { cache: 'no-store' });
+    rep = await r.json();
+    if (!r.ok) throw new Error(rep.error || r.statusText);
+  } catch (e) { $('pbody').replaceChildren(el('div', 'note', 'storage failed: ' + e.message)); return; }
+  if (panelMode !== 'storage') return;
+
+  const body = [];
+  body.push(el('p', 'note', 'RMS reserves room for the next capture when capture starts — raw video at raw_video_bitrate_mbps ' +
+    '(a whole day with continuous_capture, else the longest night), FF files for the longest night, 3 GB for saved frames, ' +
+    'and extra_space_gb — and enforces the quotas only then. Stations sharing a disk each check its free space as if alone, ' +
+    'so the disk is safe only when every station can sit at its rms_data_quota with every reserve still free. ' +
+    'The bitrate is yours to declare: take the camera\'s encoder setting and allow for overshoot (often 20–25% above a nominal CBR).'));
+
+  const inputs = {};
+  for (const g of rep.disks) {
+    const box = el('div', 'st');
+    const head = el('div', 'sth', 'disk ' + (g.mount || '?'));
+    head.append(el('span', 'meta', g.total_gb == null ? 'size unknown' : `${gb(g.total_gb)} GB · ${gb(g.free_gb)} GB free now`));
+    box.append(head);
+
+    const t = el('table', 'stor');
+    const hr = el('tr');
+    for (const [h, tip] of [['station'], ['Mbps', 'raw_video_bitrate_mbps — the budget RMS uses'], ['camera', 'BitRate in camera_settings.json, a hint only'],
+                            ['video / capture', 'GB of raw video per capture at the declared bitrate'], ['reserve', 'GB RMS keeps free for the next capture'],
+                            ['rms_data_quota'], ['continuous_capture_quota'], ['video kept', 'days of raw video continuous_capture_quota holds'],
+                            ['video_days_to_keep']]) {
+      const th = el('th', '', h); if (tip) th.title = tip; hr.append(th);
+    }
+    t.append(hr);
+    for (const s of g.stations) {
+      const tr = el('tr');
+      tr.append(el('td', '', s.id));
+      const td = el('td');
+      if (s.raw_video_save) {
+        const i = el('input'); i.type = 'text'; i.value = s.mbps == null ? '' : String(s.mbps); i.placeholder = 'Mbps';
+        i.dataset.orig = i.value; inputs[s.id] = i; td.append(i);
+        if (s.needs_mbps) td.className = 'bad', td.title = 'raw_video_save is on: declare the bitrate';
+      } else td.append('no raw video');
+      tr.append(td);
+      tr.append(el('td', 'meta', s.camera_mbps == null ? '' : s.camera_mbps.toFixed(1)));
+      tr.append(el('td', '', s.video_gb ? `${gb(s.video_gb)} GB / ${Math.round(s.video_hours)} h` : '–'));
+      tr.append(el('td', '', gb(s.reserve_gb) + ' GB'));
+      tr.append(el('td', '', s.quota_on ? gb(s.quotas.rms_data_quota) : 'off'));
+      tr.append(el('td', '', s.quota_on ? gb(s.quotas.continuous_capture_quota) : '–'));
+      const short = s.video_days != null && s.video_days_to_keep && s.video_days < s.video_days_to_keep;
+      const kd = el('td', short ? 'warn' : '', s.video_days == null ? '–' : s.video_days.toFixed(1) + ' d');
+      if (short) kd.title = `the quota deletes video long before video_days_to_keep (${s.video_days_to_keep}) does`;
+      tr.append(kd);
+      tr.append(el('td', 'meta', s.video_days_to_keep == null ? '' : String(s.video_days_to_keep)));
+      t.append(tr);
+    }
+    box.append(t);
+
+    const fit = el('div', 'fit');
+    if (g.judgeable) {
+      fit.append(`quotas ${gb(g.sum_quota_gb)} + reserves ${gb(g.sum_reserve_gb)} = ${gb(g.sum_quota_gb + g.sum_reserve_gb)} GB of ${gb(g.total_gb)}: `,
+                 el('b', g.fits ? 'ok' : 'bad', g.fits ? 'fits' : 'does not fit'));
+      const sug = g.suggestion;
+      if (sug.ok) {
+        const days = Object.values(sug.stations).map((v) => v.video_days).filter((v) => v != null);
+        const p = el('div', 'meta');
+        p.style.marginTop = '4px';
+        p.append(`Suggested, keeping ${Math.round(sug.margin * 100)}% of the disk spare: rms_data_quota ${sug.per_station_gb} per station, ` +
+                 `continuous_capture_quota moved by the same amount (${Object.entries(sug.stations).map(([k, v]) => k + ' ' + v.continuous_capture_quota).join(', ')})` +
+                 (days.length ? ` — ${Math.min(...days).toFixed(1)} days of video kept. ` : '. ') +
+                 'The captured, archive, bz2 and log allowances stay as they are.');
+        const b = el('button', 'small', 'apply suggestion');
+        b.style.marginLeft = '8px';
+        b.onclick = () => {
+          if (!confirm(`Set rms_data_quota and continuous_capture_quota on ${g.stations.length} station(s)? Each file is backed up first.`)) return;
+          const ops = [];
+          for (const [id, v] of Object.entries(sug.stations)) {
+            ops.push(['Capture', 'rms_data_quota', { [id]: String(v.rms_data_quota) }]);
+            ops.push(['Capture', 'continuous_capture_quota', { [id]: String(v.continuous_capture_quota) }]);
+          }
+          auditAct(ops, `quotas set on ${g.stations.length} station(s)`);
+        };
+        p.append(b);
+        fit.append(p);
+      } else {
+        fit.append(el('div', 'meta', 'No quota split fits: the reserves alone leave no room. Lower the bitrate or extra_space_gb, or move stations to another disk.'));
+      }
+    } else if (g.stations.some((s) => s.needs_mbps)) {
+      fit.append('Declare the bitrate of every station that saves raw video to judge this disk.');
+    } else {
+      fit.append('Quota management is off (or a quota is missing) on some station: RMS only keeps the reserve free, nothing to judge.');
+    }
+    box.append(fit);
+    body.push(box);
+  }
+  $('pbody').replaceChildren(...body);
+
+  const foot = [];
+  if (Object.keys(inputs).length) {
+    const all = el('input'); all.type = 'text'; all.placeholder = 'Mbps for every station'; all.style.width = '170px';
+    const fill = el('button', '', 'Fill');
+    fill.onclick = () => { for (const i of Object.values(inputs)) i.value = all.value.trim(); };
+    all.onkeydown = (e) => { if (e.key === 'Enter') fill.onclick(); };
+    const save = el('button', 'primary', 'Save bitrates');
+    save.onclick = () => {
+      const vals = {};
+      for (const [id, i] of Object.entries(inputs)) {
+        const v = i.value.trim();
+        if (v === i.dataset.orig) continue;
+        if (v !== '' && !(parseFloat(v) > 0)) { pmsg(`${id}: ${v} is not a bitrate`, 'bad'); return; }
+        vals[id] = v === '' ? null : v;
+      }
+      if (!Object.keys(vals).length) { pmsg('nothing changed', ''); return; }
+      auditAct([['Capture', 'raw_video_bitrate_mbps', vals]], `raw_video_bitrate_mbps set on ${Object.keys(vals).length} station(s)`);
+    };
+    foot.push(all, fill, save);
+  }
+  const rb = el('button', '', 'Refresh');
+  rb.onclick = () => renderStorage();
+  foot.push(rb);
+  $('pfoot').replaceChildren(...foot);
+}
+
 // --- wiring ----------------------------------------------------------------
 
 $('q').oninput = render;
@@ -834,7 +977,7 @@ document.addEventListener('keydown', (e) => {
 });
 window.addEventListener('beforeunload', (e) => { if (dirtyDrawer) { e.preventDefault(); e.returnValue = ''; } });
 
-// Deep links: #section=Capture  #edit=System.elevation  #vary=1  #nt=1  #panel=audit|migrate
+// Deep links: #section=Capture  #edit=System.elevation  #vary=1  #nt=1  #panel=audit|migrate|storage
 const hash = new URLSearchParams(location.hash.slice(1));
 current = hash.get('section') || localStorage.getItem('cfg.section') || 'all';
 if (hash.get('vary')) $('only-vary').checked = true;
@@ -845,7 +988,7 @@ if (hash.get('edit') && state) {
   const row = findRow(sec, (key || '').toLowerCase());
   if (row) openEditor(sec, row);
 }
-if (hash.get('panel') && state) openPanel(hash.get('panel') === 'migrate' ? 'migrate' : 'audit');
+if (hash.get('panel') && state) openPanel(['migrate', 'storage'].includes(hash.get('panel')) ? hash.get('panel') : 'audit');
 setInterval(poll, POLL_MS);
 </script>
 </body>

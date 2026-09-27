@@ -181,6 +181,39 @@ MigrateConfig also migrates the RMS root `.config` (the one `add_GStation`
 copies to new stations). Start the editor with `--include-root` to get it as an
 extra *RMS* column and include it in audits and migrations.
 
+## Storage
+
+Raw video size depends on the camera, not on anything RMS can guess, and after a
+change of camera settings the video already on disk says nothing about the next
+capture. So the bitrate is the operator's to declare: `raw_video_bitrate_mbps`
+in `[Capture]` (RMS `alpha2`; unset, RMS falls back to estimating from recent
+video). Take it from the camera's encoder setting and allow for overshoot:
+cameras often write 20–25% above a nominal CBR.
+
+The **Storage** button turns that into what the quotas mean, per disk:
+
+- per station, the room RMS reserves for the next capture — the same sum
+  `DeleteOldObservations` makes: raw video at the declared bitrate (24 h with
+  `continuous_capture`, else the longest night of the year), FF files for the
+  longest night, 3 GB for saved frames, and `extra_space_gb`;
+- how many days of video `continuous_capture_quota` really holds (and whether
+  `video_days_to_keep` is ever reached);
+- whether the stations sharing the disk fit on it: RMS enforces quotas only when
+  capture starts and each station checks free space as if it were alone, so the
+  disk is safe only when `sum(rms_data_quota) + sum(reserve) <= disk size`.
+
+When it does not fit, a banner says so, and the panel suggests one
+`rms_data_quota` for every station (3% of the disk kept spare) with
+`continuous_capture_quota` moved by the same amount, so the captured, archive,
+bz2 and log allowances stay as they are. *Fill* / *Save bitrates* declares the
+bitrate on every station; *apply suggestion* writes the quotas (with the usual
+backup and journal entry).
+
+```bash
+config-editor storage                                   # the same, per disk
+config-editor set Capture.raw_video_bitrate_mbps 27     # Section.option while no file has it yet
+```
+
 ## Command line
 
 The same view and edits from a terminal or a script:
@@ -205,6 +238,7 @@ config-editor migrate --apply          # rewrite every station on the template l
 config-editor migrate --apply --stations US005A
 config-editor migrate --apply --recent  # MigrateConfig -r: reset star_catalog_file to the template value
 config-editor audit --include-root      # the RMS root .config as an extra column
+config-editor storage                   # quotas vs. declared bitrate and disk size, per disk
 ```
 
 ## Tests

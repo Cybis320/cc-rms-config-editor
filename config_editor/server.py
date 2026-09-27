@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import __version__
+from . import __version__, storage
 from .fleet import Fleet, check_value, code_version, journal
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -42,6 +42,12 @@ class EditorHandler(BaseHTTPRequestHandler):
                     if self.fleet.changed_on_disk():
                         self.fleet.reload()
                     payload = self.fleet.audit()
+                self._send_json(200, payload)
+            elif path == "/api/storage":
+                with self.lock:
+                    if self.fleet.changed_on_disk():
+                        self.fleet.reload()
+                    payload = storage.plan(self.fleet)
                 self._send_json(200, payload)
             else:
                 self._send_error(404, "not found")

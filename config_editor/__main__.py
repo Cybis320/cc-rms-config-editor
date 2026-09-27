@@ -155,6 +155,46 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         print("\nDry run. Re-run with --apply to write (add --diff to see the exact changes).")
 
 
+def cmd_storage(args: argparse.Namespace) -> None:
+    from . import storage
+    fleet = _load(args)
+    for g in storage.plan(fleet)["disks"]:
+        print("== disk %s: %s GB, %s GB free" % (
+            g["mount"] or "?", "?" if g["total_gb"] is None else "%.0f" % g["total_gb"],
+            "?" if g["free_gb"] is None else "%.0f" % g["free_gb"]))
+        print("   %-8s %6s %8s %9s %9s %8s %7s" % ("station", "Mbps", "video/d", "reserve", "rms_quota", "cc_quota", "days"))
+        for s in g["stations"]:
+            print("   %-8s %6s %8s %9.0f %9s %8s %7s" % (
+                s["id"],
+                "?" if s["needs_mbps"] else ("-" if not s["mbps"] else "%g" % s["mbps"]),
+                "%.0f" % s["video_gb"] if s["video_gb"] else "-",
+                s["reserve_gb"],
+                "%.0f" % s["quotas"]["rms_data_quota"] if s["quota_on"] else "off",
+                "%.0f" % s["quotas"]["continuous_capture_quota"] if s["quota_on"] else "-",
+                "%.1f" % s["video_days"] if s["video_days"] is not None else "-"))
+        missing = [s["id"] for s in g["stations"] if s["needs_mbps"]]
+        if missing:
+            hints = ["%s camera %g" % (s["id"], s["camera_mbps"]) for s in g["stations"] if s["camera_mbps"]]
+            print("   raw_video_save is on but raw_video_bitrate_mbps is not set for %s%s: set it to judge this disk "
+                  "(config-editor set Capture.raw_video_bitrate_mbps N)" % (", ".join(missing),
+                                                                   " (encoder setting: %s)" % ", ".join(hints) if hints else ""))
+        if not g["judgeable"]:
+            if not missing:
+                print("   quota management is off (or incomplete) for some station: nothing to judge")
+            continue
+        total = g["sum_quota_gb"] + g["sum_reserve_gb"]
+        print("   quotas %.0f + reserves %.0f = %.0f GB of %.0f: %s" % (
+            g["sum_quota_gb"], g["sum_reserve_gb"], total, g["total_gb"], "fits" if g["fits"] else "DOES NOT FIT"))
+        sug = g["suggestion"]
+        if sug["ok"]:
+            print("   suggestion (%.0f%% margin): rms_data_quota %d per station, continuous_capture_quota adjusted by the "
+                  "same amount%s" % (sug["margin"] * 100, sug["per_station_gb"],
+                                     " (%s)" % ", ".join("%s %d" % (k, v["continuous_capture_quota"]) for k, v in sug["stations"].items())))
+        else:
+            print("   no quota split fits: the reserves alone (extra_space_gb, a day of video) leave no room — "
+                  "lower the bitrate or extra_space_gb, or move stations to another disk")
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import serve
     serve(_load(args), args.host, args.port)
@@ -206,6 +246,10 @@ def main(argv: list[str] | None = None) -> None:
                    help="also reset recently changed defaults (star_catalog_file) to the template value, like MigrateConfig -r")
     p.add_argument("--no-backup", action="store_true", help="skip the .config.bak.<timestamp> snapshot")
     p.set_defaults(func=cmd_migrate)
+
+    p = sub.add_parser("storage", help="what the quotas hold at the declared bitrate, and whether each disk fits")
+    _add_location_args(p)
+    p.set_defaults(func=cmd_storage)
 
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0].startswith("-"):
