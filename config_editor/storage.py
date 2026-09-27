@@ -255,6 +255,7 @@ def checks(fleet, disk=disk_of) -> list[dict]:
 SIM_OPTIONS = {
     "raw_video_save": False, "continuous_capture": False, "save_frames": True,
     "raw_video_bitrate_mbps": None, "extra_space_gb": 6.0,
+    "frame_file_type": "jpg", "frame_save_aligned_interval": 5.0, "jpgs_quality": 90,
     "capt_dirs_to_keep": 8, "arch_dirs_to_keep": 20, "bz2_files_to_keep": 20,
     "frame_days_to_keep": 4, "video_days_to_keep": 2, "times_days_to_keep": 8, "logdays_to_keep": 30,
     "quota_management_enabled": False, "rms_data_quota": None, "arch_dir_quota": None,
@@ -269,7 +270,7 @@ MEASURE_CACHE = Path(os.environ.get("CONFIG_EDITOR_MEASURED") or
                      (Path.home() / ".local" / "state" / "config-editor" / "measured.json"))
 MEASURE_TTL = 6 * 3600
 # Bump when measure() learns a new size: older cached results lack it and would read as 0
-MEASURE_VERSION = 2
+MEASURE_VERSION = 3
 _measured: dict | None = None     # "data_dir|stationID" -> {"at": epoch, "sizes": {...}}
 _measuring = threading.Lock()
 
@@ -365,7 +366,10 @@ def measure(data_dir: str, sid: str, cfg: dict) -> dict:
 
     # stills not yet in a timelapse: FramesFiles/<year>/<day>/<hour>/*.png|jpg. They pile
     # up until the daily frames step turns them into the timelapse and deletes them.
-    # GB per hour from the complete hour directories (the newest may still be filling).
+    # How many and at what resolution is the config's business; how well one compresses
+    # depends on the sky, so that is measured: bytes per pixel, per file type, at the
+    # 90th percentile of the complete hour directories (night and noisy frames are the
+    # big ones; the newest hour may still be filling).
     hours = []
     try:
         for year in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
@@ -373,7 +377,7 @@ def measure(data_dir: str, sid: str, cfg: dict) -> dict:
                 hours += sorted(p for p in day.iterdir() if p.is_dir())
     except OSError:
         pass
-    out["stills_gb_per_hour"] = _median_gb([_size(p) for p in hours[-7:-1]])
+    out["stills"] = _stills(hours[-7:-1])
 
     # frame-time archives: one per day under TimeFiles/<year>/
     times_dir = root / cfg.get("times_dir", "TimeFiles")
@@ -471,11 +475,66 @@ def measure_in_background(fleet, force: bool = False) -> bool:
     return measuring()
 
 
+def image_size(path: Path) -> tuple[int, int] | None:
+    """(width, height) from a PNG or JPEG header, without decoding the image."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64 * 1024)
+    except OSError:
+        return None
+    if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+        return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+    if head[:2] == b"\xff\xd8":
+        i = 2
+        while i + 9 < len(head):
+            if head[i] != 0xFF:
+                i += 1
+                continue
+            marker = head[i + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            length = int.from_bytes(head[i + 2:i + 4], "big")
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):   # start of frame
+                return int.from_bytes(head[i + 7:i + 9], "big"), int.from_bytes(head[i + 5:i + 7], "big")
+            i += 2 + length
+    return None
+
+
+def _stills(hour_dirs: list[Path]) -> dict:
+    """``{type: {"bpp", "mb", "width", "height", "files"}}`` for the stills in ``hour_dirs``:
+    bytes per pixel at the 90th percentile of the file sizes, per file type."""
+    sizes: dict = {}
+    sample: dict = {}
+    for d in hour_dirs:
+        try:
+            for p in d.iterdir():
+                ext = p.suffix.lower().lstrip(".")
+                ext = "jpg" if ext == "jpeg" else ext
+                if ext in ("png", "jpg") and p.is_file():
+                    sizes.setdefault(ext, []).append(p.stat().st_size)
+                    sample.setdefault(ext, p)
+        except OSError:
+            pass
+    out = {}
+    for ext, v in sizes.items():
+        dims = image_size(sample[ext])
+        if not dims or not dims[0] or not dims[1]:
+            continue
+        v.sort()
+        p90 = v[min(len(v) - 1, int(0.9 * len(v)))]
+        out[ext] = {"bpp": p90 / (dims[0] * dims[1]), "mb": p90 / 1024 ** 2,
+                    "width": dims[0], "height": dims[1], "files": len(v)}
+    return out
+
+
 def _parse(value, default):
     if value is None:
         return default
     if isinstance(default, bool):
         return _truthy(value)
+    if isinstance(default, str):
+        return str(value).strip().lower()
     n = _num(value)
     return n if n is not None else default
 
@@ -510,6 +569,7 @@ def sim_inputs(fleet, disk=disk_of) -> dict:
         g["stations"].append({
             "id": t.id, "data_dir": s["data_dir"], "settings": settings, "present": present,
             "night_hours": s["night_hours"], "ff_gb": s["ff_gb"], "camera_mbps": s["camera_mbps"],
+            "width": _num(raw("width")) or 1280, "height": _num(raw("height")) or 720,
             "measured": hit["sizes"] if hit else None, "measured_at": hit["at"] if hit else None,
         })
     return {"disks": list(groups.values()), "options": SIM_OPTIONS, "section": SIM_SECTION,

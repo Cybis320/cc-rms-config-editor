@@ -150,6 +150,11 @@ function controlSpec(d) {
       hint: () => { const c = d.stations.find((s) => s.camera_mbps); return c ? `camera encoder set to ${fmt(c.camera_mbps, 1)} Mbps` : ''; } },
     { key: 'continuous_capture', rms: true, type: 'bool', hint: () => P.continuous_capture ? 'raw video all day' : `raw video for the night (${fmt(P.night_hours, 1)} h at the longest)` },
     { key: 'save_frames', rms: true, type: 'bool' },
+    { key: 'frame_file_type', rms: true, type: 'choice', choices: ['png', 'jpg'] },
+    { key: 'jpgs_quality', rms: true, min: 50, max: 100, step: 1, unit: '', hint: () => P.frame_file_type === 'jpg' ? '' : 'used only with jpg' },
+    { key: 'frame_save_aligned_interval', rms: true, min: 1, max: 60, step: 1, unit: 's', hint: () => `${fmt(3600 / P.frame_save_aligned_interval)} stills an hour` },
+    { key: 'still_mb', label: 'size of one still', min: 0.01, max: 6, step: 0.01, unit: 'MB', perType: true,
+      hint: () => stillHint() },
     { key: 'sessions', label: 'capture sessions per night', min: 1, max: 6, step: 0.1, unit: '',
       hint: () => 'every restart starts another captured and archived directory — the *_dirs_to_keep limits count directories' },
 
@@ -179,8 +184,6 @@ function controlSpec(d) {
     { key: 'captured_gb', label: 'CapturedFiles', min: 0, max: 100, step: 0.5, unit: 'GB', measured: true },
     { key: 'archived_gb', label: 'ArchivedFiles', min: 0, max: 5, step: 0.05, unit: 'GB', measured: true },
     { key: 'bz2_gb', label: 'bz2 archives', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
-    { key: 'stills_gb_per_hour', label: 'stills before the timelapse', min: 0, max: 3, step: 0.01, unit: 'GB/h', measured: true,
-      hint: () => P.save_frames ? `about ${fmt(StorageSim.stillsBacklog(P), 1)} GB waiting for the daily timelapse — continuous_capture_quota must hold ≥ ${fmt(StorageSim.stillsSafeQuota(P))} GB to keep them` : 'save_frames is off' },
     { key: 'frames_gb', label: 'FramesFiles (timelapses)', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
     { key: 'times_gb', label: 'TimeFiles', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
     { key: 'logs_gb', label: 'logs', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
@@ -208,17 +211,70 @@ function initParams(keepMeasuredEdits) {
   const prev = P;
   P = { ...orig, mbps: orig.raw_video_bitrate_mbps,
     stations: st.length, disk_gb: Math.round(d.total_gb || 1000), other_gb: 0,
-    night_hours: s0.night_hours, ff_gb: s0.ff_gb,
+    night_hours: s0.night_hours, ff_gb: s0.ff_gb, width: s0.width, height: s0.height,
     sessions: +avg('sessions', 1).toFixed(1), bz2_files_per_session: Math.round(avg('bz2_files_per_session', 2)),
     captured_gb: +avg('captured_gb', 15).toFixed(1), archived_gb: +avg('archived_gb', 0.5).toFixed(2),
     bz2_gb: +avg('bz2_gb', 0.2).toFixed(2), frames_gb: +avg('frames_gb', 0.1).toFixed(2),
-    stills_gb_per_hour: +avg('stills_gb_per_hour', 0).toFixed(2),
+    ...stillParams(st),
     times_gb: +avg('times_gb', 0.01).toFixed(3), logs_gb: +avg('logs_gb', 0.01).toFixed(3) };
   delete P.raw_video_bitrate_mbps;
   // a fresh measurement only moves the size sliders nobody touched
-  const MEASURED = ['sessions', 'bz2_files_per_session', 'captured_gb', 'archived_gb', 'bz2_gb', 'frames_gb', 'stills_gb_per_hour', 'times_gb', 'logs_gb'];
-  if (keepMeasuredEdits && prev) for (const k of Object.keys(prev)) if (!MEASURED.includes(k) || edited.has(k)) P[k] = prev[k];
+  const MEASURED = ['sessions', 'bz2_files_per_session', 'captured_gb', 'archived_gb', 'bz2_gb', 'frames_gb', 'times_gb', 'logs_gb'];
+  if (keepMeasuredEdits && prev) {
+    for (const k of Object.keys(prev)) if (!MEASURED.includes(k) && k !== 'still_mb' && k !== 'still_src' && k !== 'still_n' || edited.has(k)) P[k] = prev[k];
+    // per type: keep what the operator set, take fresh measurements for the rest
+    for (const t of ['png', 'jpg']) if (prev.still_src[t] === 'set') { P.still_mb[t] = prev.still_mb[t]; P.still_src[t] = 'set'; }
+  }
   if (!keepMeasuredEdits) edited = new Set();
+}
+
+// --- stills ------------------------------------------------------------------
+// How many stills and at what resolution is the config's; how well one compresses
+// depends on the sky and is measured (bytes per pixel, 90th percentile, per type).
+// Until a type has been measured, a conservative estimate from test frames: PNG level 3
+// of 1080p sky ran 0.45-0.70 B/px; JPEG ~0.28 B/px at quality 100, ~0.06-0.09 at 90.
+function stillEstimateBpp(type, quality) {
+  if (type === 'png') return 1.0;
+  const q = Math.max(50, Math.min(100, quality || 90));
+  const bpp = q >= 90 ? 0.09 + (q - 90) / 10 * 0.19 : 0.04 + (q - 50) / 40 * 0.05;
+  return bpp * 1.25;
+}
+
+function stillParams(st) {
+  const px = (st[0].width || 1280) * (st[0].height || 720);
+  const out = { still_mb: {}, still_src: {}, still_n: {} };
+  for (const t of ['png', 'jpg']) {
+    const m = st.map((s) => s.measured && s.measured.stills && s.measured.stills[t]).filter(Boolean);
+    if (m.length) {
+      out.still_mb[t] = +(Math.max(...m.map((x) => x.bpp)) * px / 1048576).toFixed(2);   // the largest station's p90
+      out.still_src[t] = 'measured'; out.still_n[t] = m.reduce((a, x) => a + x.files, 0);
+    } else {
+      out.still_mb[t] = null; out.still_src[t] = 'estimate';
+    }
+  }
+  return out;
+}
+
+// the size used for the current type (estimates follow jpgs_quality until measured or set)
+function stillMb() {
+  const t = P.frame_file_type;
+  if (P.still_src[t] === 'estimate' || P.still_mb[t] == null) {
+    P.still_mb[t] = +(stillEstimateBpp(t, P.jpgs_quality) * P.width * P.height / 1048576).toFixed(2);
+    P.still_src[t] = 'estimate';
+  }
+  return P.still_mb[t];
+}
+
+function stillHint() {
+  const t = P.frame_file_type, src = P.still_src[t];
+  const what = src === 'measured' ? `measured: 90th percentile of ${fmt(P.still_n[t])} ${t} stills` :
+    src === 'set' ? 'set by hand' : `estimate — no ${t} stills on disk yet; measured after the first hour of them`;
+  return `${what} · ${fmt(StorageSim.stillsBacklog(P), 1)} GB wait for the daily timelapse; continuous_capture_quota must hold ≥ ${fmt(StorageSim.stillsSafeQuota(P))} GB to keep them`;
+}
+
+// the simulation's stills rate, from the config and the size of one still
+function deriveStills() {
+  P.stills_gb_per_hour = P.save_frames ? 3600 / Math.max(1, P.frame_save_aligned_interval) * stillMb() / 1024 : 0;
 }
 
 function rmsKey(key) { return key === 'mbps' ? 'raw_video_bitrate_mbps' : (key in inputs.options ? key : null); }
@@ -247,6 +303,22 @@ function renderControls() {
       chk = el('input'); chk.type = 'checkbox'; chk.checked = !!P[c.key];
       chk.onchange = () => { P[c.key] = chk.checked; update(); };
       row.append(chk);
+    } else if (c.type === 'choice') {
+      const sel = el('select');
+      for (const v of c.choices) { const o = el('option', '', v); o.value = v; sel.append(o); }
+      sel.value = P[c.key];
+      sel.onchange = () => { P[c.key] = sel.value; renderControls(); update(); };
+      row.append(sel);
+    } else if (c.perType) {
+      // one value per still file type: the slider edits the current type's
+      num = el('input'); num.type = 'number'; num.min = c.min; num.max = c.max; num.step = c.step;
+      row.append(num, el('span', 'unit', c.unit || ''));
+      range = el('input'); range.type = 'range'; range.min = c.min; range.max = c.max; range.step = c.step;
+      num.value = range.value = P.still_mb[P.frame_file_type];
+      const set = (v) => { if (!isFinite(v)) return; P.still_mb[P.frame_file_type] = v; P.still_src[P.frame_file_type] = 'set'; num.value = range.value = v; update(); };
+      wrap._show = () => { if (document.activeElement !== num) num.value = range.value = stillMb(); };
+      range.oninput = () => set(parseFloat(range.value));
+      num.onchange = () => set(parseFloat(num.value));
     } else {
       if (c.nullable) {
         setBox = el('input'); setBox.type = 'checkbox'; setBox.checked = P[c.key] != null; setBox.title = 'set (unchecked: not in the file — RMS default applies)';
@@ -294,6 +366,7 @@ function syncControls() {
     wrap.classList.toggle('changed', !!rk && JSON.stringify(P[c.key]) !== JSON.stringify(orig[rk]));
     wrap.classList.toggle('off', P[c.key] == null && c.nullable);
     if (wrap._hint) wrap.querySelector('[data-hint]').textContent = wrap._hint();
+    if (wrap._show) wrap._show();
   }
   const quotaCtl = ['rms_data_quota', 'continuous_capture_quota', 'arch_dir_quota', 'bz2_files_quota', 'log_files_quota'];
   for (const k of quotaCtl) { const w = document.querySelector(`.ctl[data-key="${k}"]`); if (w && !P.quota_management_enabled) w.classList.add('off'); }
@@ -310,10 +383,12 @@ const tuneOpts = (n) => ({ nice_days: T.nice_days, log_days: T.log_days, margin:
 function tradeoffKey() {
   return JSON.stringify([P.mbps, P.raw_video_save, P.continuous_capture, P.save_frames, P.night_hours, P.ff_gb, P.sessions,
     P.bz2_files_per_session, P.captured_gb, P.archived_gb, P.bz2_gb, P.frames_gb, P.stills_gb_per_hour, P.times_gb, P.logs_gb,
+    P.frame_file_type, P.frame_save_aligned_interval, P.jpgs_quality, P.still_mb[P.frame_file_type],
     P.stations, P.disk_gb, P.other_gb, T.nice_days, T.log_days, T.margin]);
 }
 
 function tradeoffRange() {
+  deriveStills();
   const k = tradeoffKey();
   if (T.rangeKey !== k) { T.range = StorageSim.tradeoff(P, tuneOpts(null)); T.rangeKey = k; }
   return T.range;
@@ -352,6 +427,7 @@ function autotuneBox() {
 
   let timer = null;
   const preview = (n) => {
+    deriveStills();
     const a = StorageSim.autotune(P, tuneOpts(n));
     if (!a.ok) { pair.replaceChildren(el('b', 'bad', 'does not fit')); return null; }
     pair.replaceChildren(el('b', '', `${fmt(a.result.kept.capt.min)} captured night${a.result.kept.capt.min === 1 ? '' : 's'}`), ' · ',
@@ -359,6 +435,7 @@ function autotuneBox() {
     return a;
   };
   const tune = (n) => {
+    deriveStills();
     const a = StorageSim.autotune(P, tuneOpts(n));
     if (!a.ok) { say({ b: 'Does not fit: ', bad: true }, a.reason + '. Lower the bitrate, the operator days or the number of stations.'); return; }
     applyTune(a);
@@ -417,6 +494,7 @@ function horizon() {
 }
 
 function update() {
+  deriveStills();
   const r = StorageSim.simulate(P, horizon());
   syncControls();
   const allow = r.captured_allowance;
@@ -630,7 +708,8 @@ function niceTicks(max) {
 function toFile(key, v) {
   if (v == null) return null;
   if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (/_to_keep$/.test(key)) return String(Math.round(v));
+  if (typeof v === 'string') return v;
+  if (/_to_keep$/.test(key) || key === 'jpgs_quality') return String(Math.round(v));
   return String(+Number(v).toFixed(3));
 }
 

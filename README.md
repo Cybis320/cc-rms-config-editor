@@ -212,10 +212,17 @@ It simulates, day by day and station by station, what
    start frees the room the others then see — and if all of them together write
    more than there is, capture is lost to a full disk.
 
-With `save_frames`, the stills (one PNG every few seconds) wait under
-`FramesFiles/<year>/<day>/<hour>` until the daily frames step turns them into
-the uploaded timelapse and deletes them — about a day of them, 15–20 GB per 1080p
-station, where RMS's reserve counts 3 GB. The free-space loop and
+With `save_frames`, the stills (one every `frame_save_aligned_interval`
+seconds) wait under `FramesFiles/<year>/<day>/<hour>` until the daily frames
+step turns them into the uploaded timelapse and deletes them — about a day of
+them, 20–25 GB per 1080p PNG station, where RMS's reserve counts 3 GB. How many
+and in which format (`frame_file_type`, `jpgs_quality`) come from the config and
+can be simulated and applied; how big one still is depends on the sky, not on
+anything in the config (not even the video bitrate: at 14 Mbps and up a night
+still's PNG size does not change), so it is measured — bytes per pixel at the
+90th percentile of the recent stills, per file type. For a type with no stills
+on disk yet (say, after switching to jpg) the page uses a conservative estimate,
+labelled as such, until the first hour of them has been measured. The free-space loop and
 `frame_days_to_keep` only see finished timelapses, but `continuous_capture_quota`
 deletes by file time across video, stills and frame times — and the oldest still
 waits ~25 h, beside 25 h of video. Below ~25 h of video + stills (about 300 GB at

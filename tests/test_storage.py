@@ -122,9 +122,20 @@ def test_disk_of_walks_up_to_an_existing_dir(tmp_path):
     assert d["key"] == storage.disk_of(str(tmp_path))["key"]
 
 
-def _write(path, nbytes):
+def _write(path, nbytes, head=b""):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"\0" * nbytes)
+    path.write_bytes(head + b"\0" * (nbytes - len(head)))
+
+
+def _png_head(w, h):
+    return b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + w.to_bytes(4, "big") + h.to_bytes(4, "big")
+
+
+def _jpg_head(w, h):
+    # SOI, an APP0 segment to skip, then SOF0 with height/width
+    app0 = b"\xff\xe0" + (16).to_bytes(2, "big") + b"JFIF\0" + b"\0" * 9
+    sof0 = b"\xff\xc0" + (17).to_bytes(2, "big") + b"\x08" + h.to_bytes(2, "big") + w.to_bytes(2, "big")
+    return b"\xff\xd8" + app0 + sof0
 
 
 def test_measure_per_night_sizes(tmp_path):
@@ -138,8 +149,11 @@ def test_measure_per_night_sizes(tmp_path):
         _write(data / "ArchivedFiles" / ("XX0001_" + n) / "a.fits", 2 * MB)
         _write(data / "ArchivedFiles" / ("XX0001_%s_imgdata.tar.bz2" % n), 1 * MB)
         _write(data / "ArchivedFiles" / ("XX0001_%s_metadata.tar.bz2" % n), 1 * MB)
-    for h in range(8):   # stills: 20 MB an hour, the newest hour still filling
-        _write(data / "FramesFiles" / "2026" / "20260925-268" / ("20260925-268_%02d" % h) / "a.png", (20 if h < 7 else 5) * MB)
+    # stills: ten 1,000x500 PNGs an hour of 100..1000 kB, the newest hour still filling
+    for h in range(8):
+        for i in range(10):
+            _write(data / "FramesFiles" / "2026" / "20260925-268" / ("20260925-268_%02d" % h) / ("s%d.png" % i),
+                   (i + 1) * 100_000 if h < 7 else 5 * MB, _png_head(1000, 500))
     for d in ("20260921", "20260922", "20260923", "20260924", "20260925"):
         _write(data / "FramesFiles" / ("XX0001_%s-020000_to_%s-120000_frames_timelapse.tar" % (d, d)), 3 * MB)
     m = storage.measure(str(data), "XX0001", {})
@@ -149,7 +163,10 @@ def test_measure_per_night_sizes(tmp_path):
     assert m["bz2_gb"] == pytest.approx(2 * MB / GB * 7 / 6)
     assert m["bz2_files_per_session"] == 2
     assert m["frames_gb"] == pytest.approx(3 * MB / GB)
-    assert m["stills_gb_per_hour"] == pytest.approx(20 * MB / GB)
+    png = m["stills"]["png"]
+    assert (png["width"], png["height"]) == (1000, 500) and png["files"] == 60   # the newest hour skipped
+    assert png["bpp"] == pytest.approx(1_000_000 / 500_000)                      # 90th percentile: 1,000 kB
+    assert "jpg" not in m["stills"]
     assert m["times_gb"] is None and m["logs_gb"] is None                    # nothing there
 
 
@@ -186,4 +203,22 @@ def test_old_measurements_are_not_used(tmp_path, monkeypatch):
     assert storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]["measured"] is None
     storage.measure_all(fleet)
     assert not storage.stale(fleet)
-    assert "stills_gb_per_hour" in storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]["measured"]
+    assert "stills" in storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]["measured"]
+
+
+def test_image_size(tmp_path):
+    (tmp_path / "a.png").write_bytes(_png_head(1920, 1080) + b"\0" * 100)
+    (tmp_path / "a.jpg").write_bytes(_jpg_head(1920, 1080) + b"\0" * 100)
+    (tmp_path / "x.png").write_bytes(b"not an image")
+    assert storage.image_size(tmp_path / "a.png") == (1920, 1080)
+    assert storage.image_size(tmp_path / "a.jpg") == (1920, 1080)
+    assert storage.image_size(tmp_path / "x.png") is None
+
+
+def test_stills_options_reach_the_simulator(tmp_path):
+    fleet, disk = fleet_of(tmp_path, n=1)
+    fleet.apply("Capture", "frame_file_type", {"US005A": "PNG"}, backup=False)
+    st = storage.sim_inputs(fleet, disk)["disks"][0]["stations"][0]
+    assert st["settings"]["frame_file_type"] == "png"                   # as RMS reads it: lower-cased
+    assert st["settings"]["frame_save_aligned_interval"] == 5.0 and not st["present"]["frame_save_aligned_interval"]
+    assert (st["width"], st["height"]) == (1920, 1080)
