@@ -237,8 +237,12 @@ assumptions: all stations on the disk alike, the bitrate and sizes as set.
 Raw video and CapturedFiles — the science that is not uploaded and is lost on
 deletion — get all the room left once the operator data (archives and bz2 for N
 nights, logs for N days), a day of stills, the next capture's reserve and a
-margin are set aside; CapturedFiles keeps as many nights as raw video days, or a
-fixed number. The proposal is the largest for which the simulation loses nothing
+margin are set aside. How that room is split between the two is a slider —
+from one captured night (the most raw video) to the most captured nights that
+still leave a day of raw video — showing the resulting pair (e.g. "3 captured
+nights · 2.8 days of raw video") and what a captured night costs in video;
+*same days of each* sets as many nights as days. Once tuned, moving the split
+re-tunes the page live. The proposal is the largest for which the simulation loses nothing
 to a full disk and the free-space loop never has to delete (so the quotas do,
 evenly on every station), with at least a day of raw video — otherwise it says
 it does not fit. It only moves the sliders; review, then **Apply**.

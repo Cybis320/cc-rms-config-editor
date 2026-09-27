@@ -51,7 +51,12 @@
   .derived b.bad { color: var(--bad); }
   .grp.tune { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 2px 10px 10px; margin-top: 10px; }
   .grp.tune .ctl { border-bottom: 0; padding: 3px 0; }
-  .grp.tune select { max-width: 190px; }
+  .grp.tune .split { padding: 6px 0 8px; border-bottom: 1px solid var(--line2); }
+  .grp.tune .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .grp.tune .pair { font-size: 13px; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .grp.tune .pair b.bad { color: var(--bad); }
+  .grp.tune .split button { margin-top: 4px; }
+  .grp.tune .split .hint { font-size: 11px; color: var(--muted); }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .tile { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
@@ -297,45 +302,100 @@ function syncControls() {
 // --- auto-tune -------------------------------------------------------------
 // Raw video and CapturedFiles are the science that is not uploaded and is lost on
 // deletion; everything else gets a fixed number of days. See StorageSim.autotune.
-const T = { capt_mode: 'match', capt_nights: 14, nice_days: 14, log_days: 30, margin: 3, said: null };
+const T = { capt_nights: null, nice_days: 14, log_days: 30, margin: 3, said: null, live: false, range: null, rangeKey: null };
+
+const tuneOpts = (n) => ({ nice_days: T.nice_days, log_days: T.log_days, margin: T.margin / 100, capt_nights: n });
+
+// what the trade-off depends on: sizes, bitrate, disk — not the settings the tune writes
+function tradeoffKey() {
+  return JSON.stringify([P.mbps, P.raw_video_save, P.continuous_capture, P.save_frames, P.night_hours, P.ff_gb, P.sessions,
+    P.bz2_files_per_session, P.captured_gb, P.archived_gb, P.bz2_gb, P.frames_gb, P.stills_gb_per_hour, P.times_gb, P.logs_gb,
+    P.stations, P.disk_gb, P.other_gb, T.nice_days, T.log_days, T.margin]);
+}
+
+function tradeoffRange() {
+  const k = tradeoffKey();
+  if (T.rangeKey !== k) { T.range = StorageSim.tradeoff(P, tuneOpts(null)); T.rangeKey = k; }
+  return T.range;
+}
+
+function applyTune(a) {
+  for (const k of Object.keys(inputs.options)) {
+    const key = k === 'raw_video_bitrate_mbps' ? 'mbps' : k;
+    if (k in a.settings && key !== 'mbps') P[key] = a.settings[k];
+  }
+}
 
 function autotuneBox() {
   const g = el('div', 'grp tune');
   g.append(el('h3', '', 'Auto-tune (optional)'));
-  g.append(el('p', '', 'Raw video and CapturedFiles are not uploaded and are lost on deletion: they get all the room left once the operator data, a day of stills, the next capture\'s reserve and a margin are set aside (timelapses and frame times are kept as long as the raw video: they share its quota) — the most for which the simulation loses nothing to a full disk and the free-space loop never deletes. Assumes every station on the disk alike, at the bitrate and sizes below.'));
+  g.append(el('p', '', 'Raw video and CapturedFiles are not uploaded and are lost on deletion: they share all the room left once the operator data, a day of stills, the next capture\'s reserve and a margin are set aside — the most for which the simulation loses nothing to a full disk and the free-space loop never deletes. Assumes every station on the disk alike, at the bitrate and sizes below. Timelapses and frame times are kept as long as the raw video (they share its quota).'));
   const row = (label, input, unit) => { const w = el('div', 'ctl'); const r = el('div', 'row'); r.append(el('span', 'name plain', label), input); if (unit) r.append(el('span', 'unit', unit)); w.append(r); return w; };
-  const num = (key, min, max, step) => { const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = step; i.value = T[key]; i.onchange = () => { T[key] = parseFloat(i.value) || 0; }; return i; };
-  const sel = el('select');
-  for (const [v, t] of [['match', 'as many nights as raw video days'], ['fixed', 'a fixed number of nights']]) { const o = el('option', '', t); o.value = v; sel.append(o); }
-  sel.value = T.capt_mode;
-  const nights = num('capt_nights', 1, 120, 1);
-  const syncN = () => { nights.disabled = T.capt_mode !== 'fixed'; };
-  sel.onchange = () => { T.capt_mode = sel.value; syncN(); };
-  syncN();
-  g.append(row('CapturedFiles', sel), row('… nights (fixed)', nights, 'nights'),
+  const num = (key, min, max, step) => {
+    const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = step; i.value = T[key];
+    i.onchange = () => { T[key] = parseFloat(i.value) || 0; refresh(); };
+    return i;
+  };
+
+  // the split: captured nights on a slider, the raw video it leaves shown beside it
+  const split = el('div', 'split');
+  const ends = el('div', 'ends'); ends.append(el('span', '', '◀ more raw video'), el('span', '', 'more CapturedFiles ▶'));
+  const slider = el('input'); slider.type = 'range'; slider.step = 1;
+  const pair = el('div', 'pair');
+  const cost = el('div', 'hint');
+  const eq = el('button', 'small', 'same days of each');
+  eq.title = 'as many captured nights as days of raw video';
+  split.append(ends, slider, pair, cost, eq);
+
+  const out = el('div', 'derived');
+  const say = (...parts) => { T.said = parts; out.replaceChildren(...parts.map((x) => typeof x === 'string' ? x : el('b', x.bad ? 'bad' : '', x.b))); };
+
+  let timer = null;
+  const preview = (n) => {
+    const a = StorageSim.autotune(P, tuneOpts(n));
+    if (!a.ok) { pair.replaceChildren(el('b', 'bad', 'does not fit')); return null; }
+    pair.replaceChildren(el('b', '', `${fmt(a.result.kept.capt.min)} captured night${a.result.kept.capt.min === 1 ? '' : 's'}`), ' · ',
+      el('b', '', `${fmt(a.result.kept.video.min, 1)} days of raw video`));
+    return a;
+  };
+  const tune = (n) => {
+    const a = StorageSim.autotune(P, tuneOpts(n));
+    if (!a.ok) { say({ b: 'Does not fit: ', bad: true }, a.reason + '. Lower the bitrate, the operator days or the number of stations.'); return; }
+    applyTune(a);
+    T.live = true;
+    T.said = ['Tuned: ', { b: a.video ? `${fmt(a.result.kept.video.min, 1)} days of raw video` : 'no raw video' }, ' and ',
+      { b: `${fmt(a.result.kept.capt.min)} captured nights` }, ' on every station. Move the split to trade one for the other; review below, then Apply.'];
+    renderControls(); update();
+  };
+
+  function refresh() {
+    const r = tradeoffRange();
+    if (!r.ok) { split.style.display = 'none'; say({ b: 'Does not fit: ', bad: true }, r.reason + '. Lower the bitrate, the operator days or the number of stations.'); return; }
+    split.style.display = r.video && r.max > r.min ? '' : 'none';
+    if (T.capt_nights == null || T.capt_nights > r.max) T.capt_nights = r.match;
+    slider.min = r.min; slider.max = r.max; slider.value = T.capt_nights;
+    cost.textContent = r.video ? `each captured night costs ≈ ${fmt(r.night_cost_days * 24, 1)} h of raw video · from ${r.min} to ${r.max} nights` : '';
+    preview(T.capt_nights);
+  }
+
+  slider.oninput = () => {
+    T.capt_nights = +slider.value;
+    // each step is a search over simulations (~0.1 s): settle before computing
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (T.live) tune(T.capt_nights); else preview(T.capt_nights); }, 90);
+  };
+  eq.onclick = () => { T.capt_nights = tradeoffRange().match; slider.value = T.capt_nights; preview(T.capt_nights); if (T.live) tune(T.capt_nights); };
+
+  g.append(split,
     row('archives and bz2 (uploaded)', num('nice_days', 2, 90, 1), 'nights'),
     row('logs', num('log_days', 1, 365, 1), 'days'),
     row('disk left spare', num('margin', 0, 20, 0.5), '%'));
-  const b = el('button', 'primary', 'Auto-tune');
+  const b = el('button', 'primary', T.live ? 'Re-tune' : 'Auto-tune');
   b.style.marginTop = '8px';
-  const out = el('div', 'derived');
-  const say = (...parts) => { T.said = parts; out.replaceChildren(...parts.map((x) => typeof x === 'string' ? x : el('b', x.bad ? 'bad' : '', x.b))); };
-  if (T.said) say(...T.said);
-  b.onclick = () => {
-    const a = StorageSim.autotune(P, { nice_days: T.nice_days, log_days: T.log_days, margin: T.margin / 100,
-                                      capt_nights: T.capt_mode === 'fixed' ? T.capt_nights : null });
-    if (!a.ok) { say({ b: 'Does not fit: ', bad: true }, a.reason + '. Lower the bitrate, the operator days or the number of stations.'); return; }
-    for (const k of Object.keys(inputs.options)) {
-      const key = k === 'raw_video_bitrate_mbps' ? 'mbps' : k;
-      if (k in a.settings && key !== 'mbps') P[key] = a.settings[k];
-    }
-    const dv = a.result.kept.video.min, nc = a.result.kept.capt.min;
-    T.said = ['Tuned: ', { b: a.video ? `${fmt(dv, 1)} days of raw video` : 'no raw video' }, ' and ',
-      { b: `${fmt(nc)} captured nights` }, ' on every station. Review below, then Apply.'];
-    renderControls(); update();
-    toast('auto-tuned — nothing written yet');
-  };
+  b.onclick = () => { tune(T.capt_nights); toast('auto-tuned — nothing written yet'); };
   g.append(b, out);
+  if (T.said) say(...T.said);
+  refresh();
   return g;
 }
 
@@ -398,7 +458,8 @@ function renderResults(r) {
   card.append(el('h2', '', 'What each kind of data keeps'), el('p', 'sub', `In steady state, just after cleanup, per station (a range when stations fare differently). The white tick is what the *_to_keep option asks for; the text says which rule actually deletes it.`));
   const grid = el('div', 'ret');
   const rows = CATS.filter((c) => !(c.k === 'video' && !(P.raw_video_save && P.mbps)) && !(c.k === 'frames' && !P.save_frames));
-  const targetOf = (c) => P[c.target] > 0 ? P[c.target] / (c.perNight ? c.perNight() : 1) : null;
+  // with continuous capture video_days_to_keep counts today's directory too
+  const targetOf = (c) => P[c.target] > 0 ? (P[c.target] - (c.k === 'video' && P.continuous_capture ? 1 : 0)) / (c.perNight ? c.perNight() : 1) : null;
   const maxX = Math.max(1, ...rows.map((c) => Math.max(r.kept[c.k].max, targetOf(c) || 0))) * 1.05;
   for (const c of rows) {
     const k = r.kept[c.k], tgt = targetOf(c);
@@ -415,7 +476,9 @@ function renderResults(r) {
     why.append(el('b', '', `${range(k)} ${c.unit}`), ' · ');
     if (!rules.length) why.append(el('span', '', `nothing deleted in ${r.days} simulated days`));
     else {
-      const short = tgt != null && k.min < tgt - 0.5 && !rules.includes(c.target);
+      // more than a day (or night) short of what the option asks — the count limits are
+      // usually left a little loose on purpose, so the quota does the deleting
+      const short = tgt != null && k.min < tgt - 1 - 1e-9 && !rules.includes(c.target);
       why.append(el('span', short ? 'short' : '', (short ? 'cut short by ' : 'limited by ') + rules.map(describeRule).join(' and ')));
     }
     grid.append(lab, bar, why);
@@ -654,13 +717,13 @@ async function poll() {
 }
 
 $('disk').onchange = () => { diskIdx = +$('disk').value; P = null; initParams(false); renderControls(); update(); $('mstatus').textContent = measuredStatus(); };
-$('reset').onclick = () => { T.said = null; initParams(false); renderControls(); update(); };
+$('reset').onclick = () => { T.said = null; T.live = false; T.capt_nights = null; initParams(false); renderControls(); update(); };
 $('apply').onclick = apply;
 $('remeasure').onclick = () => load(false, true);
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(update, 150); });
 load(false, false, INITIAL).then(() => {
   // #tune runs the auto-tune on arrival (a link that shows the proposal straight away)
-  if (location.hash === '#tune') { const b = document.querySelector('.grp.tune button'); if (b) b.click(); }
+  if (location.hash === '#tune') { const b = document.querySelector('.grp.tune button.primary'); if (b) b.click(); }
 });
 </script>
 </body>

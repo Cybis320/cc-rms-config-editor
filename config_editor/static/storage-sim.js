@@ -287,7 +287,8 @@
     // never below 25 h of video + stills: the oldest still must live to its timelapse
     const cc = up(Math.max(vday * D + stillsBacklog(p) + others + 1, stillsSafeQuota(p)));
     q.continuous_capture_quota = vday || p.save_frames ? cc : 1;
-    q.video_days_to_keep = vday ? up(D) + (p.continuous_capture ? 1 : 0) + 1 : p.video_days_to_keep;
+    // one day looser than the quota keeps (plus today's directory with continuous capture)
+    q.video_days_to_keep = vday ? up(D) + (p.continuous_capture ? 1 : 0) : p.video_days_to_keep;
     q.rms_data_quota = up(capt + q.arch_dir_quota + q.bz2_files_quota + q.continuous_capture_quota + q.log_files_quota);
     return { q, D, N };
   }
@@ -321,7 +322,23 @@
              result: (final.ok ? final : best).r, video: !!vday };
   }
 
-  const api = { simulate, reserve, videoPerDay, stillsBacklog, stillsSafeQuota, quotaOn, capturedAllowance, autotune, tuneFor, GB, CATS };
+  // The raw video / CapturedFiles trade-off: how many captured nights the tune can keep
+  // (1 .. the most that still leaves a day of raw video), the split with as many nights
+  // as video days, and what one captured night costs in video.
+  function tradeoff(p, o) {
+    const vday = videoPerDay(p);
+    const at = (n) => autotune(p, { ...o, capt_nights: n });
+    const one = at(1);
+    if (!one.ok) return { ok: false, reason: one.reason };
+    const match = autotune(p, { ...o, capt_nights: null });
+    if (!vday) return { ok: true, video: false, min: 1, max: match.N, match: match.N, night_cost_days: 0 };
+    const cost = p.captured_gb / vday;            // days of video per captured night
+    let max = Math.min(365, 1 + Math.floor((one.D - 1) / cost));
+    while (max > 1 && !at(max).ok) max--;
+    return { ok: true, video: true, min: 1, max, match: Math.min(max, match.N), night_cost_days: cost };
+  }
+
+  const api = { simulate, tradeoff, reserve, videoPerDay, stillsBacklog, stillsSafeQuota, quotaOn, capturedAllowance, autotune, tuneFor, GB, CATS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.StorageSim = api;
 })(this);
