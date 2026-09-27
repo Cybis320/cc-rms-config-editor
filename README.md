@@ -215,11 +215,13 @@ It simulates, day by day and station by station, what
 With `save_frames`, the stills (one PNG every few seconds) wait under
 `FramesFiles/<year>/<day>/<hour>` until the daily frames step turns them into
 the uploaded timelapse and deletes them — about a day of them, 15–20 GB per 1080p
-station, where RMS's reserve counts 3 GB. They are the newest files, so the
-quota deletes them last and the free-space loop never touches them, but that
-backlog has to fit: the simulator carries it, and warns when
-`continuous_capture_quota` is too small to hold it or `extra_space_gb` does not
-cover what the reserve misses. (`frame_file_type: jpg` makes them far smaller.)
+station, where RMS's reserve counts 3 GB. The free-space loop and
+`frame_days_to_keep` only see finished timelapses, but `continuous_capture_quota`
+deletes by file time across video, stills and frame times — and the oldest still
+waits ~25 h, beside 25 h of video. Below ~25 h of video + stills (about 300 GB at
+27 Mbps, 1080p) it deletes stills before their timelapse is made. The simulator
+carries the backlog, warns about that and about an `extra_space_gb` that does not
+cover what the reserve misses, and the auto-tune never goes below it. (`frame_file_type: jpg` makes them far smaller.)
 
 Raw video comes from the declared `raw_video_bitrate_mbps` (RMS `alpha2`; take
 the camera's encoder setting and allow for overshoot, often 20–25% above a

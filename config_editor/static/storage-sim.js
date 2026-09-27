@@ -19,9 +19,12 @@
 //   (stills) with save_frames, the frames of the day pile up as PNG/JPG under
 //                          FramesFiles/<year>/<day>/<hour> until the daily frames step
 //                          turns them into the timelapse (uploaded) and deletes them:
-//                          about a day of stills is always on disk. They count toward
-//                          continuous_capture_quota (newest first, so they go last) and
-//                          the free-space loop never touches them; RMS's reserve counts
+//                          about a day of stills is always on disk. The free-space loop
+//                          and frame_days_to_keep only see finished timelapses, but
+//                          continuous_capture_quota deletes by file time across video,
+//                          frames and times: stills are as old as the video beside them,
+//                          so a quota under ~25 h of video + stills deletes the oldest
+//                          stills before their timelapse is made. RMS's reserve counts
 //                          3 GB for them.
 //   4. free-space loop     until the disk has room for the next capture — FF files for the
 //                          night, raw video, 3 GB of frames and extra_space_gb — delete one
@@ -50,6 +53,16 @@
   function stillsBacklog(p) {
     if (!p.save_frames || !p.stills_gb_per_hour) return 0;
     return p.stills_gb_per_hour * ((p.continuous_capture ? 24 : p.night_hours) + 1);
+  }
+
+  // The smallest continuous_capture_quota that keeps every still until its timelapse:
+  // the oldest waits ~25 h, and the video, frame times and timelapses written beside it
+  // count toward the same quota
+  function stillsSafeQuota(p) {
+    const b = stillsBacklog(p);
+    if (!b) return 0;
+    const hours = (p.continuous_capture ? 24 : p.night_hours) + 1;
+    return b + videoPerDay(p) * hours / (p.continuous_capture ? 24 : p.night_hours) + (p.times_gb || 0) + (p.frames_gb || 0);
   }
 
   function quotaOn(p) {
@@ -101,18 +114,26 @@
     };
 
     // objectsToDeleteByTime: file by file, newest first, across the given categories;
-    // keeps at most q GB (the file that crosses goes too — at day scale, a trim).
+    // keeps at most q GB. Files of one day are interleaved in time (video, stills and
+    // frame times are written side by side), so the day the cut falls in loses the same
+    // oldest share of each; every older day goes entirely.
     const timeQuota = (s, cats, q, rule, day) => {
-      const all = [];
-      for (const c of cats) s.items[c].forEach((it) => all.push([it, c]));
-      all.sort((a, b) => b[0].day - a[0].day || cats.indexOf(a[1]) - cats.indexOf(b[1]));
+      const byDay = new Map();
+      for (const c of cats) for (const it of s.items[c]) {
+        if (!byDay.has(it.day)) byDay.set(it.day, []);
+        byDay.get(it.day).push([it, c]);
+      }
       let acc = 0;
-      for (const [it, c] of all) {
-        if (acc + it.gb <= q) { acc += it.gb; continue; }
-        const keep = Math.max(0, q - acc);
+      for (const d of [...byDay.keys()].sort((a, b) => b - a)) {
+        const group = byDay.get(d);
+        const g = group.reduce((a, [it]) => a + it.gb, 0);
+        if (acc + g <= q) { acc += g; continue; }
+        const f = Math.max(0, q - acc) / g;
         acc = q;
-        if (keep > 1e-9) { total -= it.gb - keep; it.gb = keep; deletions.push({ day, cat: c, rule }); }
-        else drop(s, c, s.items[c].indexOf(it), rule, day);
+        for (const [it, c] of group) {
+          if (f * it.gb > 1e-9) { total -= it.gb * (1 - f); it.gb *= f; deletions.push({ day, cat: c, rule }); }
+          else drop(s, c, s.items[c].indexOf(it), rule, day);
+        }
       }
     };
 
@@ -263,7 +284,8 @@
     q.frame_days_to_keep = tdays;
     q.times_days_to_keep = tdays;
     const others = (p.save_frames ? p.frames_gb * tdays : 0) + p.times_gb * tdays;
-    const cc = up(vday * D + stillsBacklog(p) + others + 1);
+    // never below 25 h of video + stills: the oldest still must live to its timelapse
+    const cc = up(Math.max(vday * D + stillsBacklog(p) + others + 1, stillsSafeQuota(p)));
     q.continuous_capture_quota = vday || p.save_frames ? cc : 1;
     q.video_days_to_keep = vday ? up(D) + (p.continuous_capture ? 1 : 0) + 1 : p.video_days_to_keep;
     q.rms_data_quota = up(capt + q.arch_dir_quota + q.bz2_files_quota + q.continuous_capture_quota + q.log_files_quota);
@@ -299,7 +321,7 @@
              result: (final.ok ? final : best).r, video: !!vday };
   }
 
-  const api = { simulate, reserve, videoPerDay, stillsBacklog, quotaOn, capturedAllowance, autotune, tuneFor, GB, CATS };
+  const api = { simulate, reserve, videoPerDay, stillsBacklog, stillsSafeQuota, quotaOn, capturedAllowance, autotune, tuneFor, GB, CATS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.StorageSim = api;
 })(this);

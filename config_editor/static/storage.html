@@ -175,7 +175,7 @@ function controlSpec(d) {
     { key: 'archived_gb', label: 'ArchivedFiles', min: 0, max: 5, step: 0.05, unit: 'GB', measured: true },
     { key: 'bz2_gb', label: 'bz2 archives', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
     { key: 'stills_gb_per_hour', label: 'stills before the timelapse', min: 0, max: 3, step: 0.01, unit: 'GB/h', measured: true,
-      hint: () => P.save_frames ? `about ${fmt(StorageSim.stillsBacklog(P), 1)} GB waiting for the daily timelapse` : 'save_frames is off' },
+      hint: () => P.save_frames ? `about ${fmt(StorageSim.stillsBacklog(P), 1)} GB waiting for the daily timelapse — continuous_capture_quota must hold ≥ ${fmt(StorageSim.stillsSafeQuota(P))} GB to keep them` : 'save_frames is off' },
     { key: 'frames_gb', label: 'FramesFiles (timelapses)', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
     { key: 'times_gb', label: 'TimeFiles', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
     { key: 'logs_gb', label: 'logs', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
@@ -478,7 +478,9 @@ function findings(r) {
   if (r.quota_on && P.log_files_quota === 0) out.push(['bad', 'log_files_quota 0 deletes every log at each start.']);
   if (P.quota_management_enabled && !r.quota_on) out.push(['warn', 'quota_management_enabled is on but a quota is unset: RMS disables quota management entirely.']);
   if (P.raw_video_save && !P.mbps) out.push(['warn', 'No raw_video_bitrate_mbps: RMS estimates the video from the last days on disk, which lags any camera change. Declare it to simulate video.']);
-  if (r.stills_cut) out.push(['bad', `continuous_capture_quota is smaller than the stills waiting for the timelapse (~${fmt(r.stills_gb)} GB) plus a day of video: stills are deleted before the timelapse is made.`]);
+  const safe = StorageSim.stillsSafeQuota(P);
+  if (r.stills_cut || (r.quota_on && safe && P.continuous_capture_quota < safe))
+    out.push(['bad', `Stills are deleted before their timelapse is made: continuous_capture_quota deletes by file time across video, stills and frame times, and the oldest still waits ~25 h. It needs at least ~${fmt(safe)} GB (25 h of video + stills); it is ${fmt(P.continuous_capture_quota)} GB.`]);
   if (r.stills_gb > 3) {
     const miss = r.stills_gb - 3;
     out.push([P.extra_space_gb >= miss ? 'info' : 'warn', `The stills waiting for the daily timelapse take ~${fmt(r.stills_gb)} GB per station, and RMS's reserve counts 3 GB for them: ${fmt(miss)} GB it does not see` +
