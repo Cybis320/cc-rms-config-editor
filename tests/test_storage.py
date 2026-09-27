@@ -138,6 +138,8 @@ def test_measure_per_night_sizes(tmp_path):
         _write(data / "ArchivedFiles" / ("XX0001_" + n) / "a.fits", 2 * MB)
         _write(data / "ArchivedFiles" / ("XX0001_%s_imgdata.tar.bz2" % n), 1 * MB)
         _write(data / "ArchivedFiles" / ("XX0001_%s_metadata.tar.bz2" % n), 1 * MB)
+    for h in range(8):   # stills: 20 MB an hour, the newest hour still filling
+        _write(data / "FramesFiles" / "2026" / "20260925-268" / ("20260925-268_%02d" % h) / "a.png", (20 if h < 7 else 5) * MB)
     for d in ("20260921", "20260922", "20260923", "20260924", "20260925"):
         _write(data / "FramesFiles" / ("XX0001_%s-020000_to_%s-120000_frames_timelapse.tar" % (d, d)), 3 * MB)
     m = storage.measure(str(data), "XX0001", {})
@@ -147,6 +149,7 @@ def test_measure_per_night_sizes(tmp_path):
     assert m["bz2_gb"] == pytest.approx(2 * MB / GB * 7 / 6)
     assert m["bz2_files_per_session"] == 2
     assert m["frames_gb"] == pytest.approx(3 * MB / GB)
+    assert m["stills_gb_per_hour"] == pytest.approx(20 * MB / GB)
     assert m["times_gb"] is None and m["logs_gb"] is None                    # nothing there
 
 

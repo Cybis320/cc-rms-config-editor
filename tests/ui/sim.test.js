@@ -54,4 +54,32 @@ ok(near(r.kept.video.min, 2, 0.05) && r.binding.video[0] === 'video_days_to_keep
 r = run({ quota_management_enabled: false, video_days_to_keep: 3, stations: 1, continuous_capture: false });
 ok(near(r.kept.video.min, 3, 0.05), 'night-only capture: video_days_to_keep 3 keeps 3 nights');
 
+// stills waiting for the daily timelapse
+const st = { stills_gb_per_hour: 0.8 };
+ok(near(S.stillsBacklog({ ...base, ...st }), 0.8 * 25, 1e-9), 'continuous: a day of stills plus the hour of the frames step');
+ok(near(S.stillsBacklog({ ...base, ...st, continuous_capture: false }), 0.8 * 14.26, 1e-9), 'night only: the night of stills plus an hour');
+ok(S.stillsBacklog({ ...base, ...st, save_frames: false }) === 0, 'save_frames off: no stills');
+r = run({ ...st, continuous_capture_quota: 15 });
+ok(r.stills_cut, 'continuous_capture_quota below the stills backlog deletes stills before the timelapse');
+r = run(st);
+ok(!r.stills_cut && !r.binding.stills.length, 'stills are the newest files: the quota and the loop leave them alone');
+
+// auto-tune
+const tb = { ...base, ...st, rms_data_quota: 965, continuous_capture_quota: 681, extra_space_gb: 120 };
+const opts = { nice_days: 14, log_days: 30, margin: 0.03, capt_nights: null };
+let a = S.autotune(tb, opts);
+ok(a.ok, 'auto-tune finds a fit for six 27 Mbps stations');
+ok(a.result.lost_per_day === 0 && !Object.values(a.result.binding).some((x) => x.includes('free space')), '... nothing lost, and the free-space loop never deletes');
+ok(Math.abs(a.result.kept.video.min - a.result.kept.video.max) < 0.01, '... every station keeps the same');
+ok(a.N === Math.round(a.D) && a.result.kept.capt.min === a.N, '... as many captured nights as raw video days');
+ok(a.settings.extra_space_gb >= S.stillsBacklog(tb) - 3, '... extra_space_gb covers the stills RMS does not count');
+ok(a.settings.arch_dirs_to_keep === 14 && a.settings.bz2_files_to_keep === 28 && a.settings.logdays_to_keep === 30, '... operator data by count: 14 nights, 28 bz2 files, 30 days of logs');
+let more = S.tuneFor(tb, opts, a.D + 0.3);
+let rm = S.simulate({ ...more.q, other_gb: 0.03 * tb.disk_gb }, 74);
+ok(rm.lost_per_day > 0 || Object.values(rm.binding).some((x) => x.includes('free space')) || rm.kept.capt.min < more.N, '... and it is the most: 0.3 day more no longer fits');
+a = S.autotune(tb, { ...opts, capt_nights: 14 });
+ok(a.ok && a.result.kept.capt.min === 14 && a.D < S.autotune(tb, opts).D, 'fixed 14 captured nights: fewer raw video days');
+a = S.autotune({ ...tb, stations: 12 }, opts);
+ok(!a.ok && /one day/.test(a.reason), 'twelve such stations on the disk: under a day of video each — no fit, said so');
+
 process.exit(failed ? 1 : 0);

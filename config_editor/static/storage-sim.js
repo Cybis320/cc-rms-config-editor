@@ -16,6 +16,13 @@
 //                          to log_files_quota and frames+times+video files to
 //                          continuous_capture_quota (objectsToDeleteByTime: newest first,
 //                          file by file, and a quota of 0 deletes everything)
+//   (stills) with save_frames, the frames of the day pile up as PNG/JPG under
+//                          FramesFiles/<year>/<day>/<hour> until the daily frames step
+//                          turns them into the timelapse (uploaded) and deletes them:
+//                          about a day of stills is always on disk. They count toward
+//                          continuous_capture_quota (newest first, so they go last) and
+//                          the free-space loop never touches them; RMS's reserve counts
+//                          3 GB for them.
 //   4. free-space loop     until the disk has room for the next capture — FF files for the
 //                          night, raw video, 3 GB of frames and extra_space_gb — delete one
 //                          video day, one frames day, one captured dir, one archived dir, one
@@ -26,7 +33,7 @@
 
 (function (root) {
   const GB = 1024 ** 3;
-  const CATS = ['video', 'frames', 'times', 'capt', 'arch', 'bz2', 'logs'];
+  const CATS = ['video', 'stills', 'frames', 'times', 'capt', 'arch', 'bz2', 'logs'];
 
   // Raw video one capture writes: the whole day with continuous_capture, else the night
   function videoPerDay(p) {
@@ -37,6 +44,12 @@
   // What deleteOldObservations keeps free for the next capture
   function reserve(p) {
     return p.ff_gb + p.extra_space_gb + videoPerDay(p) + (p.save_frames ? 3 : 0);
+  }
+
+  // Stills waiting for the daily timelapse: the capture hours plus an hour for the step itself
+  function stillsBacklog(p) {
+    if (!p.save_frames || !p.stills_gb_per_hour) return 0;
+    return p.stills_gb_per_hour * ((p.continuous_capture ? 24 : p.night_hours) + 1);
   }
 
   function quotaOn(p) {
@@ -126,7 +139,7 @@
           dirQuota(s, 'arch', p.arch_dir_quota, 'arch_dir_quota', day);
           dirQuota(s, 'bz2', p.bz2_files_quota, 'bz2_files_quota', day);
           timeQuota(s, ['logs'], p.log_files_quota, 'log_files_quota', day);
-          timeQuota(s, ['frames', 'times', 'video'], p.continuous_capture_quota, 'continuous_capture_quota', day);
+          timeQuota(s, ['stills', 'frames', 'times', 'video'], p.continuous_capture_quota, 'continuous_capture_quota', day);
         }
         // 4. free space for the next capture
         let guard = 0;
@@ -149,12 +162,16 @@
 
       // the day's writes; what does not fit is lost (capture stops with ENOSPC)
       let lost = 0;
+      const backlog = stillsBacklog(p);
       for (const s of st) {
+        // the frames step turned yesterday's stills into the timelapse and deleted them
+        for (const it of s.items.stills.splice(0)) total -= it.gb;
         s.acc += sessions;
         const k = Math.floor(s.acc + 1e-9);
         s.acc -= k;
         const add = [];
         if (vday) add.push(['video', vday]);
+        if (backlog) add.push(['stills', backlog]);
         if (p.save_frames) add.push(['frames', p.frames_gb]);
         add.push(['times', p.times_gb], ['logs', p.logs_gb]);
         for (let j = 0; j < k; j++) {
@@ -200,13 +217,89 @@
       series, kept, binding, need, vday, days, stations: n,
       captured_allowance: capturedAllowance(p), quota_on: qOn,
       lost_per_day: last.reduce((a, d) => a + d.lost, 0) / last.length,
+      stills_gb: stillsBacklog(p),
+      stills_cut: deletions.some((d) => d.cat === 'stills' && d.day >= days - 14),
       overflow_days: last.filter((d) => d.lost > 0).length,
       peak_gb: Math.max(...last.map((d) => d.peak)),
       usable_gb: usable,
     };
   }
 
-  const api = { simulate, reserve, videoPerDay, quotaOn, capturedAllowance, GB, CATS };
+  // --- auto-tune ----------------------------------------------------------------
+  //
+  // Simplified: every station on the disk alike. Raw video and CapturedFiles are the
+  // science that is not uploaded and is lost on deletion; everything else (archives,
+  // bz2, timelapses, frame times, logs) is uploaded or only for the operator and gets a
+  // fixed number of days. The precious two get all that is left once the stills
+  // backlog, the next capture's reserve and a margin are set aside — the most for
+  // which the simulation shows nothing lost to a full disk and the free-space loop
+  // never deleting (so the quotas do it, evenly on every station).
+  //
+  // o: { nice_days, log_days, margin, capt_nights (null: as many nights as raw video days) }
+  function tuneFor(p, o, D) {
+    const q = { ...p };
+    const sess = Math.max(0.1, p.sessions || 1), bpf = p.bz2_files_per_session || 2;
+    const vday = videoPerDay(p);
+    const up = (x, step = 1) => Math.ceil(x / step - 1e-9) * step;
+    q.quota_management_enabled = true;
+    // operator data: nice_days of each, quotas with 25% slack so the counts do the deleting
+    q.arch_dirs_to_keep = up(o.nice_days * sess);
+    q.arch_dir_quota = Math.max(1, up(p.archived_gb * o.nice_days * 1.25));
+    q.bz2_files_to_keep = up(o.nice_days * sess * bpf);
+    q.bz2_files_quota = Math.max(1, up(p.bz2_gb * o.nice_days * 1.25));
+    q.logdays_to_keep = o.log_days;
+    q.log_files_quota = Math.max(0.1, up(p.logs_gb * o.log_days * 1.5, 0.1));
+    // RMS reserves 3 GB for frames: add what the stills backlog needs beyond it, and room
+    // for the night's archive being built
+    q.extra_space_gb = up(Math.max(0, stillsBacklog(p) - 3) + p.archived_gb + p.bz2_gb + 5);
+    // precious: D days of raw video, N nights of CapturedFiles
+    const N = o.capt_nights != null ? o.capt_nights : Math.max(1, Math.round(D));
+    const perSession = p.captured_gb / sess;
+    const capt = (N * sess + 0.5) * perSession;           // objectsToDelete keeps whole dirs under the allowance
+    q.capt_dirs_to_keep = up(N * sess) + 1;
+    // timelapses and frame times share continuous_capture_quota, which deletes by age
+    // across video, frames and times: they live as long as the raw video, no longer
+    const tdays = vday ? up(D) : o.nice_days;
+    q.frame_days_to_keep = tdays;
+    q.times_days_to_keep = tdays;
+    const others = (p.save_frames ? p.frames_gb * tdays : 0) + p.times_gb * tdays;
+    const cc = up(vday * D + stillsBacklog(p) + others + 1);
+    q.continuous_capture_quota = vday || p.save_frames ? cc : 1;
+    q.video_days_to_keep = vday ? up(D) + (p.continuous_capture ? 1 : 0) + 1 : p.video_days_to_keep;
+    q.rms_data_quota = up(capt + q.arch_dir_quota + q.bz2_files_quota + q.continuous_capture_quota + q.log_files_quota);
+    return { q, D, N };
+  }
+
+  function autotune(p, o) {
+    const sp = { ...p, other_gb: (p.other_gb || 0) + (o.margin || 0) * p.disk_gb };
+    const days = Math.min(240, Math.max(45, Math.ceil(Math.max(o.nice_days, o.log_days) * 2 + 14)));
+    const vday = videoPerDay(p);
+    const good = (D) => {
+      const t = tuneFor(p, o, D);
+      const r = simulate({ ...t.q, other_gb: sp.other_gb }, days);
+      const loop = Object.values(r.binding).some((rules) => rules.includes('free space'));
+      return { ok: r.lost_per_day === 0 && !loop && !r.stills_cut && r.kept.capt.min >= t.N - 0.01, t, r };
+    };
+    // D: days of raw video (or nights of CapturedFiles without raw video); largest that passes
+    // at least a day: less, and last night's raw video can be gone before anyone looks
+    const MIN = 1;
+    let lo = MIN, hi = 60, best = null;
+    const g0 = good(MIN);
+    if (!g0.ok) return { ok: false, reason: 'no room: not even one day of raw video and one captured night fit next to the operator data and the reserve', result: g0.r };
+    best = g0;
+    for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2;
+      const g = good(mid);
+      if (g.ok) { best = g; lo = mid; } else hi = mid;
+    }
+    // keep a round number of tenths
+    const D = Math.floor(best.t.D * 10) / 10;
+    const final = good(Math.max(MIN, D));
+    return { ok: true, settings: (final.ok ? final : best).t.q, D: (final.ok ? final : best).t.D, N: (final.ok ? final : best).t.N,
+             result: (final.ok ? final : best).r, video: !!vday };
+  }
+
+  const api = { simulate, reserve, videoPerDay, stillsBacklog, quotaOn, capturedAllowance, autotune, tuneFor, GB, CATS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.StorageSim = api;
 })(this);

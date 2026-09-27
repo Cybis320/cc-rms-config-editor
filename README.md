@@ -203,12 +203,23 @@ It simulates, day by day and station by station, what
    managed), and `continuous_capture_quota` covers video, frames and frame times
    together. A quota of 0 means "off" for directories and bz2 but deletes
    *everything* for `continuous_capture_quota` and `log_files_quota`;
+   The time-managed quota deletes by age across all three, so timelapses and
+   frame times are never kept longer than the raw video;
 4. the free-space loop: until the disk has room for the next capture (FF files,
    raw video, 3 GB of frames and `extra_space_gb`), one video day, one frames day,
    one captured night, one archived night and one times day at a time. Each
    station checks the shared disk as if it were alone on it, so the first to
    start frees the room the others then see — and if all of them together write
    more than there is, capture is lost to a full disk.
+
+With `save_frames`, the stills (one PNG every few seconds) wait under
+`FramesFiles/<year>/<day>/<hour>` until the daily frames step turns them into
+the uploaded timelapse and deletes them — about a day of them, 15–20 GB per 1080p
+station, where RMS's reserve counts 3 GB. They are the newest files, so the
+quota deletes them last and the free-space loop never touches them, but that
+backlog has to fit: the simulator carries it, and warns when
+`continuous_capture_quota` is too small to hold it or `extra_space_gb` does not
+cover what the reserve misses. (`frame_file_type: jpg` makes them far smaller.)
 
 Raw video comes from the declared `raw_video_bitrate_mbps` (RMS `alpha2`; take
 the camera's encoder setting and allow for overshoot, often 20–25% above a
@@ -218,6 +229,18 @@ measured from the last few nights on disk, in the background (a cold disk takes
 a minute; results are cached in `~/.local/state/config-editor/measured.json`),
 and can be moved too. So can the number of stations and the disk size, to plan
 a new camera.
+
+**Auto-tune** (optional) proposes every storage setting from simplified
+assumptions: all stations on the disk alike, the bitrate and sizes as set.
+Raw video and CapturedFiles — the science that is not uploaded and is lost on
+deletion — get all the room left once the operator data (archives and bz2 for N
+nights, logs for N days), a day of stills, the next capture's reserve and a
+margin are set aside; CapturedFiles keeps as many nights as raw video days, or a
+fixed number. The proposal is the largest for which the simulation loses nothing
+to a full disk and the free-space loop never has to delete (so the quotas do,
+evenly on every station), with at least a day of raw video — otherwise it says
+it does not fit. It only moves the sliders; review, then **Apply**.
+`#tune` in the URL (`/storage#tune`) runs it on arrival.
 
 Sliders start at the values in the files (the most common one when stations
 differ, which the page points out). **Apply to stations** writes only what you

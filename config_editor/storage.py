@@ -361,6 +361,18 @@ def measure(data_dir: str, sid: str, cfg: dict) -> dict:
     vals = [v for _k, v in sorted(fdays.items())][-6:-1]
     out["frames_gb"] = _median_gb(vals)
 
+    # stills not yet in a timelapse: FramesFiles/<year>/<day>/<hour>/*.png|jpg. They pile
+    # up until the daily frames step turns them into the timelapse and deletes them.
+    # GB per hour from the complete hour directories (the newest may still be filling).
+    hours = []
+    try:
+        for year in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            for day in sorted(p for p in year.iterdir() if p.is_dir()):
+                hours += sorted(p for p in day.iterdir() if p.is_dir())
+    except OSError:
+        pass
+    out["stills_gb_per_hour"] = _median_gb([_size(p) for p in hours[-7:-1]])
+
     # frame-time archives: one per day under TimeFiles/<year>/
     times_dir = root / cfg.get("times_dir", "TimeFiles")
     tdays = []

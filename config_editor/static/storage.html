@@ -49,6 +49,9 @@
   .derived { font-size: 12px; padding: 6px 0; color: var(--muted); }
   .derived b { color: var(--text); font-weight: 600; }
   .derived b.bad { color: var(--bad); }
+  .grp.tune { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 2px 10px 10px; margin-top: 10px; }
+  .grp.tune .ctl { border-bottom: 0; padding: 3px 0; }
+  .grp.tune select { max-width: 190px; }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .tile { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
@@ -135,6 +138,7 @@ let edited = new Set();// measured-size controls the user moved (kept when a mea
 function controlSpec(d) {
   const perStation = d.total_gb ? Math.ceil(d.total_gb / Math.max(1, P.stations) * 1.25) : 2000;
   return [
+    { autotune: true },
     { group: 'Camera', note: 'What each station writes. The bitrate is the one number RMS cannot know: declare what the camera really writes (often 20–25% above its nominal CBR).' },
     { key: 'raw_video_save', rms: true, type: 'bool' },
     { key: 'mbps', rms: 'raw_video_bitrate_mbps', min: 0, max: 60, step: 0.5, unit: 'Mbps', nullable: true,
@@ -170,7 +174,9 @@ function controlSpec(d) {
     { key: 'captured_gb', label: 'CapturedFiles', min: 0, max: 100, step: 0.5, unit: 'GB', measured: true },
     { key: 'archived_gb', label: 'ArchivedFiles', min: 0, max: 5, step: 0.05, unit: 'GB', measured: true },
     { key: 'bz2_gb', label: 'bz2 archives', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
-    { key: 'frames_gb', label: 'FramesFiles (processed)', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
+    { key: 'stills_gb_per_hour', label: 'stills before the timelapse', min: 0, max: 3, step: 0.01, unit: 'GB/h', measured: true,
+      hint: () => P.save_frames ? `about ${fmt(StorageSim.stillsBacklog(P), 1)} GB waiting for the daily timelapse` : 'save_frames is off' },
+    { key: 'frames_gb', label: 'FramesFiles (timelapses)', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
     { key: 'times_gb', label: 'TimeFiles', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
     { key: 'logs_gb', label: 'logs', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
 
@@ -201,10 +207,11 @@ function initParams(keepMeasuredEdits) {
     sessions: +avg('sessions', 1).toFixed(1), bz2_files_per_session: Math.round(avg('bz2_files_per_session', 2)),
     captured_gb: +avg('captured_gb', 15).toFixed(1), archived_gb: +avg('archived_gb', 0.5).toFixed(2),
     bz2_gb: +avg('bz2_gb', 0.2).toFixed(2), frames_gb: +avg('frames_gb', 0.1).toFixed(2),
+    stills_gb_per_hour: +avg('stills_gb_per_hour', 0).toFixed(2),
     times_gb: +avg('times_gb', 0.01).toFixed(3), logs_gb: +avg('logs_gb', 0.01).toFixed(3) };
   delete P.raw_video_bitrate_mbps;
   // a fresh measurement only moves the size sliders nobody touched
-  const MEASURED = ['sessions', 'bz2_files_per_session', 'captured_gb', 'archived_gb', 'bz2_gb', 'frames_gb', 'times_gb', 'logs_gb'];
+  const MEASURED = ['sessions', 'bz2_files_per_session', 'captured_gb', 'archived_gb', 'bz2_gb', 'frames_gb', 'stills_gb_per_hour', 'times_gb', 'logs_gb'];
   if (keepMeasuredEdits && prev) for (const k of Object.keys(prev)) if (!MEASURED.includes(k) || edited.has(k)) P[k] = prev[k];
   if (!keepMeasuredEdits) edited = new Set();
 }
@@ -222,6 +229,7 @@ function renderControls() {
       if (c.note) grp.append(el('p', '', c.note));
       box.append(grp); continue;
     }
+    if (c.autotune) { box.append(autotuneBox()); continue; }
     if (c.derived) { const x = el('div', 'derived'); x.dataset.derived = c.derived; grp.append(x); continue; }
     const rk = c.rms ? rmsKey(c.key) : null;
     const wrap = el('div', 'ctl'); wrap.dataset.key = c.key;
@@ -276,6 +284,7 @@ function renderControls() {
 function syncControls() {
   for (const wrap of document.querySelectorAll('.ctl')) {
     const c = wrap._spec;
+    if (!c) continue;   // the auto-tune box's own inputs
     const rk = c.rms ? rmsKey(c.key) : null;
     wrap.classList.toggle('changed', !!rk && JSON.stringify(P[c.key]) !== JSON.stringify(orig[rk]));
     wrap.classList.toggle('off', P[c.key] == null && c.nullable);
@@ -285,6 +294,51 @@ function syncControls() {
   for (const k of quotaCtl) { const w = document.querySelector(`.ctl[data-key="${k}"]`); if (w && !P.quota_management_enabled) w.classList.add('off'); }
 }
 
+// --- auto-tune -------------------------------------------------------------
+// Raw video and CapturedFiles are the science that is not uploaded and is lost on
+// deletion; everything else gets a fixed number of days. See StorageSim.autotune.
+const T = { capt_mode: 'match', capt_nights: 14, nice_days: 14, log_days: 30, margin: 3, said: null };
+
+function autotuneBox() {
+  const g = el('div', 'grp tune');
+  g.append(el('h3', '', 'Auto-tune (optional)'));
+  g.append(el('p', '', 'Raw video and CapturedFiles are not uploaded and are lost on deletion: they get all the room left once the operator data, a day of stills, the next capture\'s reserve and a margin are set aside (timelapses and frame times are kept as long as the raw video: they share its quota) — the most for which the simulation loses nothing to a full disk and the free-space loop never deletes. Assumes every station on the disk alike, at the bitrate and sizes below.'));
+  const row = (label, input, unit) => { const w = el('div', 'ctl'); const r = el('div', 'row'); r.append(el('span', 'name plain', label), input); if (unit) r.append(el('span', 'unit', unit)); w.append(r); return w; };
+  const num = (key, min, max, step) => { const i = el('input'); i.type = 'number'; i.min = min; i.max = max; i.step = step; i.value = T[key]; i.onchange = () => { T[key] = parseFloat(i.value) || 0; }; return i; };
+  const sel = el('select');
+  for (const [v, t] of [['match', 'as many nights as raw video days'], ['fixed', 'a fixed number of nights']]) { const o = el('option', '', t); o.value = v; sel.append(o); }
+  sel.value = T.capt_mode;
+  const nights = num('capt_nights', 1, 120, 1);
+  const syncN = () => { nights.disabled = T.capt_mode !== 'fixed'; };
+  sel.onchange = () => { T.capt_mode = sel.value; syncN(); };
+  syncN();
+  g.append(row('CapturedFiles', sel), row('… nights (fixed)', nights, 'nights'),
+    row('archives and bz2 (uploaded)', num('nice_days', 2, 90, 1), 'nights'),
+    row('logs', num('log_days', 1, 365, 1), 'days'),
+    row('disk left spare', num('margin', 0, 20, 0.5), '%'));
+  const b = el('button', 'primary', 'Auto-tune');
+  b.style.marginTop = '8px';
+  const out = el('div', 'derived');
+  const say = (...parts) => { T.said = parts; out.replaceChildren(...parts.map((x) => typeof x === 'string' ? x : el('b', x.bad ? 'bad' : '', x.b))); };
+  if (T.said) say(...T.said);
+  b.onclick = () => {
+    const a = StorageSim.autotune(P, { nice_days: T.nice_days, log_days: T.log_days, margin: T.margin / 100,
+                                      capt_nights: T.capt_mode === 'fixed' ? T.capt_nights : null });
+    if (!a.ok) { say({ b: 'Does not fit: ', bad: true }, a.reason + '. Lower the bitrate, the operator days or the number of stations.'); return; }
+    for (const k of Object.keys(inputs.options)) {
+      const key = k === 'raw_video_bitrate_mbps' ? 'mbps' : k;
+      if (k in a.settings && key !== 'mbps') P[key] = a.settings[k];
+    }
+    const dv = a.result.kept.video.min, nc = a.result.kept.capt.min;
+    T.said = ['Tuned: ', { b: a.video ? `${fmt(dv, 1)} days of raw video` : 'no raw video' }, ' and ',
+      { b: `${fmt(nc)} captured nights` }, ' on every station. Review below, then Apply.'];
+    renderControls(); update();
+    toast('auto-tuned — nothing written yet');
+  };
+  g.append(b, out);
+  return g;
+}
+
 // --- simulation & results -----------------------------------------------
 
 const CATS = [
@@ -292,7 +346,7 @@ const CATS = [
   { k: 'capt', label: 'CapturedFiles', unit: 'nights', target: 'capt_dirs_to_keep', perNight: () => P.sessions },
   { k: 'arch', label: 'ArchivedFiles', unit: 'nights', target: 'arch_dirs_to_keep', perNight: () => P.sessions },
   { k: 'bz2', label: 'bz2 archives', unit: 'nights', target: 'bz2_files_to_keep', perNight: () => P.sessions * P.bz2_files_per_session },
-  { k: 'frames', label: 'FramesFiles', unit: 'days', target: 'frame_days_to_keep' },
+  { k: 'frames', label: 'Timelapses', unit: 'days', target: 'frame_days_to_keep' },
   { k: 'times', label: 'TimeFiles', unit: 'days', target: 'times_days_to_keep' },
   { k: 'logs', label: 'Logs', unit: 'days', target: 'logdays_to_keep' },
 ];
@@ -311,7 +365,8 @@ function update() {
     : el('b', allow <= 0 ? 'bad' : '', allow <= 0 ? `${fmt(allow, 1)} GB — RMS treats this as “not managed”` : `${fmt(allow, 1)} GB`));
   const rv = document.querySelector('[data-derived=reserve]');
   if (rv) rv.replaceChildren('Reserved per station: ', el('b', '', `${fmt(r.need)} GB`),
-    ` (FF ${fmt(P.ff_gb)} + video ${fmt(r.vday)} + frames ${P.save_frames ? 3 : 0} + extra ${fmt(P.extra_space_gb)})`);
+    ` (FF ${fmt(P.ff_gb)} + video ${fmt(r.vday)} + frames ${P.save_frames ? 3 : 0} + extra ${fmt(P.extra_space_gb)})`,
+    r.stills_gb > 3 ? el('div', '', `The stills waiting for the timelapse take ~${fmt(r.stills_gb)} GB; RMS counts 3 GB for them.`) : '');
   renderResults(r);
   const changes = pendingChanges();
   $('apply').disabled = !changes.length;
@@ -423,6 +478,14 @@ function findings(r) {
   if (r.quota_on && P.log_files_quota === 0) out.push(['bad', 'log_files_quota 0 deletes every log at each start.']);
   if (P.quota_management_enabled && !r.quota_on) out.push(['warn', 'quota_management_enabled is on but a quota is unset: RMS disables quota management entirely.']);
   if (P.raw_video_save && !P.mbps) out.push(['warn', 'No raw_video_bitrate_mbps: RMS estimates the video from the last days on disk, which lags any camera change. Declare it to simulate video.']);
+  if (r.stills_cut) out.push(['bad', `continuous_capture_quota is smaller than the stills waiting for the timelapse (~${fmt(r.stills_gb)} GB) plus a day of video: stills are deleted before the timelapse is made.`]);
+  if (r.stills_gb > 3) {
+    const miss = r.stills_gb - 3;
+    out.push([P.extra_space_gb >= miss ? 'info' : 'warn', `The stills waiting for the daily timelapse take ~${fmt(r.stills_gb)} GB per station, and RMS's reserve counts 3 GB for them: ${fmt(miss)} GB it does not see` +
+      (P.extra_space_gb >= miss ? ` — extra_space_gb ${fmt(P.extra_space_gb)} covers it.` : `, more than extra_space_gb ${fmt(P.extra_space_gb)} covers. The auto-tune adds it.`)]);
+  }
+  if (r.binding.frames && r.binding.frames.includes('continuous_capture_quota') && P.frame_days_to_keep > r.kept.frames.min + 0.5)
+    out.push(['info', 'Timelapses and frame times share continuous_capture_quota with raw video, which deletes by age across all three: they are never kept longer than the raw video, whatever frame_days_to_keep says.']);
   if (P.sessions > 1.2) out.push(['info', `${fmt(P.sessions, 1)} capture sessions per night: each restart is another captured and archived directory, so capt_dirs_to_keep ${P.capt_dirs_to_keep} is only ${fmt(P.capt_dirs_to_keep / P.sessions, 1)} nights.`]);
   return out;
 }
@@ -589,11 +652,14 @@ async function poll() {
 }
 
 $('disk').onchange = () => { diskIdx = +$('disk').value; P = null; initParams(false); renderControls(); update(); $('mstatus').textContent = measuredStatus(); };
-$('reset').onclick = () => { initParams(false); renderControls(); update(); };
+$('reset').onclick = () => { T.said = null; initParams(false); renderControls(); update(); };
 $('apply').onclick = apply;
 $('remeasure').onclick = () => load(false, true);
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(update, 150); });
-load(false, false, INITIAL);
+load(false, false, INITIAL).then(() => {
+  // #tune runs the auto-tune on arrival (a link that shows the proposal straight away)
+  if (location.hash === '#tune') { const b = document.querySelector('.grp.tune button'); if (b) b.click(); }
+});
 </script>
 </body>
 </html>
