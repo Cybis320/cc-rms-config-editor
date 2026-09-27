@@ -181,38 +181,54 @@ MigrateConfig also migrates the RMS root `.config` (the one `add_GStation`
 copies to new stations). Start the editor with `--include-root` to get it as an
 extra *RMS* column and include it in audits and migrations.
 
-## Storage
+## Storage simulator
 
-Raw video size depends on the camera, not on anything RMS can guess, and after a
-change of camera settings the video already on disk says nothing about the next
-capture. So the bitrate is the operator's to declare: `raw_video_bitrate_mbps`
-in `[Capture]` (RMS `alpha2`; unset, RMS falls back to estimating from recent
-video). Take it from the camera's encoder setting and allow for overshoot:
-cameras often write 20–25% above a nominal CBR.
+RMS's storage settings are inherited and interact in ways nobody can hold in
+their head: age and count limits, five quotas (one of them only "what is left"),
+and a free-space loop that deletes round-robin. The **Storage** button opens a
+simulator (`/storage`): move a slider and see, per kind of data, how many days
+or nights it really keeps and which rule is doing the deleting, plus the shared
+disk day by day.
 
-The **Storage** button turns that into what the quotas mean, per disk:
+It simulates, day by day and station by station, what
+`RMS.DeleteOldObservations` does at every capture start:
 
-- per station, the room RMS reserves for the next capture — the same sum
-  `DeleteOldObservations` makes: raw video at the declared bitrate (24 h with
-  `continuous_capture`, else the longest night of the year), FF files for the
-  longest night, 3 GB for saved frames, and `extra_space_gb`;
-- how many days of video `continuous_capture_quota` really holds (and whether
-  `video_days_to_keep` is ever reached);
-- whether the stations sharing the disk fit on it: RMS enforces quotas only when
-  capture starts and each station checks free space as if it were alone, so the
-  disk is safe only when `sum(rms_data_quota) + sum(reserve) <= disk size`.
+1. logs older than `logdays_to_keep`;
+2. the count limits — `*_dirs_to_keep` count *directories* (every restart is
+   another captured and archived directory), `bz2_files_to_keep` counts *files*
+   (two per night), and with continuous capture `video_days_to_keep` counts the
+   directory being written today;
+3. the quotas, only with `quota_management_enabled` and all five set:
+   CapturedFiles gets `rms_data_quota` minus the other four (0 or less: not
+   managed), and `continuous_capture_quota` covers video, frames and frame times
+   together. A quota of 0 means "off" for directories and bz2 but deletes
+   *everything* for `continuous_capture_quota` and `log_files_quota`;
+4. the free-space loop: until the disk has room for the next capture (FF files,
+   raw video, 3 GB of frames and `extra_space_gb`), one video day, one frames day,
+   one captured night, one archived night and one times day at a time. Each
+   station checks the shared disk as if it were alone on it, so the first to
+   start frees the room the others then see — and if all of them together write
+   more than there is, capture is lost to a full disk.
 
-When it does not fit, a banner says so, and the panel suggests one
-`rms_data_quota` for every station (3% of the disk kept spare) with
-`continuous_capture_quota` moved by the same amount, so the captured, archive,
-bz2 and log allowances stay as they are. *Fill* / *Save bitrates* declares the
-bitrate on every station; *apply suggestion* writes the quotas (with the usual
-backup and journal entry).
+Raw video comes from the declared `raw_video_bitrate_mbps` (RMS `alpha2`; take
+the camera's encoder setting and allow for overshoot, often 20–25% above a
+nominal CBR). Every other size per night — CapturedFiles, ArchivedFiles, bz2,
+frames, frame times, logs, and how many capture sessions a night makes — is
+measured from the last few nights on disk, in the background (a cold disk takes
+a minute; results are cached in `~/.local/state/config-editor/measured.json`),
+and can be moved too. So can the number of stations and the disk size, to plan
+a new camera.
 
-```bash
-config-editor storage                                   # the same, per disk
-config-editor set Capture.raw_video_bitrate_mbps 27     # Section.option while no file has it yet
-```
+Sliders start at the values in the files (the most common one when stations
+differ, which the page points out). **Apply to stations** writes only what you
+moved, to every station on that disk whose value differs, with the usual backup
+and journal entry. The simulation engine is `static/storage-sim.js`
+(`node tests/ui/sim.test.js` checks it against hand-worked cases).
+
+The editor also warns, in its banner, when the stations on a disk could hold
+more (`sum(rms_data_quota)`) than the disk has once each keeps its next capture's
+room free — the line past which the free-space loop, not the quotas, does the
+deleting. `config-editor storage` prints that check per disk.
 
 ## Command line
 
@@ -255,4 +271,5 @@ re-render while the drawer is open, adjacent rows in the *only varying* view):
 ```bash
 npm install jsdom@22        # once
 node tests/ui/drive.js
+node tests/ui/sim.test.js   # the storage simulator's engine (no jsdom needed)
 ```

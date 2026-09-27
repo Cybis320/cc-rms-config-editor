@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storage Simulator</title>
+<style>
+  :root {
+    --bg: #0d1117; --tile: #161b22; --line: #30363d; --line2: #21262d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    /* chart series: reference palette dark steps 1-3, validated all-pairs against --bg */
+    --s-video: #3987e5; --s-capt: #d95926; --s-other: #199e70;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0; white-space: nowrap; }
+  a { color: var(--accent); }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  button { background: var(--line2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button:disabled { opacity: .5; cursor: default; }
+  select, input[type=number] { background: var(--line2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12.5px; }
+  input[type=number] { width: 76px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+
+  #layout { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 45px); }
+  @media (max-width: 900px) { #layout { grid-template-columns: 1fr; } }
+  #controls { scrollbar-color: var(--line) var(--bg); border-right: 1px solid var(--line); padding: 8px 14px 40px; overflow-y: auto; max-height: calc(100vh - 45px); position: sticky; top: 45px; }
+  @media (max-width: 900px) { #controls { max-height: none; position: static; border-right: 0; } }
+  #results { padding: 14px 20px 40px; min-width: 0; }
+
+  .grp h3 { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 4px; }
+  .grp p { font-size: 11.5px; color: var(--muted); margin: 0 0 6px; }
+  .ctl { padding: 6px 0 4px; border-bottom: 1px solid var(--line2); }
+  .ctl .row { display: flex; align-items: center; gap: 8px; }
+  .ctl .name { flex: 1; font-size: 12.5px; font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; }
+  .ctl .name.plain { font-family: inherit; }
+  .ctl.changed .name { color: var(--warn); }
+  .ctl.changed .name::after { content: " •"; }
+  .ctl .unit { font-size: 11px; color: var(--muted); min-width: 34px; }
+  .ctl .hint { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .ctl .differs { font-size: 11px; color: var(--warn); margin-top: 1px; }
+  .ctl.off input[type=range], .ctl.off input[type=number] { opacity: .35; }
+  .derived { font-size: 12px; padding: 6px 0; color: var(--muted); }
+  .derived b { color: var(--text); font-weight: 600; }
+  .derived b.bad { color: var(--bad); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .tile { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .k { font-size: 11.5px; color: var(--muted); }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .s { font-size: 11.5px; color: var(--muted); }
+  .tile.bad { border-color: var(--bad); } .tile.bad .v { color: var(--bad); }
+
+  section.card { background: var(--tile); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; }
+  section.card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  section.card .sub { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+
+  .ret { display: grid; grid-template-columns: 150px 1fr 240px; align-items: center; gap: 4px 12px; font-size: 12.5px; }
+  .ret .lab { white-space: nowrap; }
+  .ret .lab small { color: var(--muted); display: block; font-size: 11px; }
+  .ret .bar { position: relative; height: 22px; }
+  .ret .bar .fill { position: absolute; left: 0; top: 7px; height: 8px; border-radius: 0 4px 4px 0; background: var(--s-video); }
+  .ret .bar .range { position: absolute; top: 7px; height: 8px; border-radius: 0 4px 4px 0; background: var(--s-video); opacity: .35; }
+  .ret .bar .target { position: absolute; top: 2px; width: 2px; height: 18px; background: var(--text); border-radius: 1px; }
+  .ret .bar .track { position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: var(--line2); }
+  .ret .why { font-size: 12px; color: var(--muted); }
+  .ret .why b { color: var(--text); font-weight: 500; }
+  .ret .why .short { color: var(--warn); }
+  @media (max-width: 700px) { .ret { grid-template-columns: 110px 1fr; } .ret .why { grid-column: 1 / 3; margin-bottom: 6px; } }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+  .legend span.line::before { height: 2px; vertical-align: 3px; }
+  #chart { position: relative; }
+  #chart svg { display: block; width: 100%; }
+  #chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  #tip { position: absolute; pointer-events: none; background: #1c2128; border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none; z-index: 3; font-variant-numeric: tabular-nums; }
+  #tip .r { display: flex; gap: 12px; justify-content: space-between; }
+  #tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  ul.find { margin: 0; padding-left: 0; list-style: none; font-size: 12.5px; }
+  ul.find li { padding: 5px 0; border-top: 1px solid var(--line2); }
+  ul.find li:first-child { border-top: 0; }
+  ul.find .sev { font-weight: 600; margin-right: 6px; }
+  ul.find .sev.bad { color: var(--bad); } ul.find .sev.warn { color: var(--warn); } ul.find .sev.info { color: var(--muted); }
+  code { font-family: ui-monospace, monospace; font-size: 12px; }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  table.data { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 6px; }
+  table.data th, table.data td { padding: 2px 10px 2px 0; text-align: right; }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data th { color: var(--muted); font-weight: 500; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #1f6feb; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Storage simulator</h1>
+  <a href="/" class="meta">← config editor</a>
+  <select id="disk" title="stations are simulated together per disk" style="display:none"></select>
+  <span class="spacer"></span>
+  <span class="meta" id="mstatus"></span>
+  <button id="remeasure" title="measure the per-night sizes again from what is on disk">Re-measure</button>
+  <button id="reset" title="back to the values in the station files">Reset</button>
+  <button id="apply" class="primary" disabled>Apply to stations</button>
+</header>
+<div id="layout">
+  <aside id="controls"></aside>
+  <main id="results"><div class="meta">loading…</div></main>
+</div>
+<div id="toast"></div>
+
+<script src="/storage-sim.js"></script>
+<script>
+const INITIAL = /*__SIM__*/null;  // injected by the server
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const svgEl = (tag, attrs) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const fmt = (v, d = 0) => v == null || !isFinite(v) ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+
+let inputs = null;     // /api/storage-sim
+let diskIdx = 0;
+let P = null;          // current simulation parameters (sliders)
+let orig = null;       // the files' values for the RMS options (majority over the stations)
+let edited = new Set();// measured-size controls the user moved (kept when a measurement lands)
+
+// --- controls ------------------------------------------------------------
+// rms: the option written to the station files; sim-only controls have none.
+function controlSpec(d) {
+  const perStation = d.total_gb ? Math.ceil(d.total_gb / Math.max(1, P.stations) * 1.25) : 2000;
+  return [
+    { group: 'Camera', note: 'What each station writes. The bitrate is the one number RMS cannot know: declare what the camera really writes (often 20–25% above its nominal CBR).' },
+    { key: 'raw_video_save', rms: true, type: 'bool' },
+    { key: 'mbps', rms: 'raw_video_bitrate_mbps', min: 0, max: 60, step: 0.5, unit: 'Mbps', nullable: true,
+      hint: () => { const c = d.stations.find((s) => s.camera_mbps); return c ? `camera encoder set to ${fmt(c.camera_mbps, 1)} Mbps` : ''; } },
+    { key: 'continuous_capture', rms: true, type: 'bool', hint: () => P.continuous_capture ? 'raw video all day' : `raw video for the night (${fmt(P.night_hours, 1)} h at the longest)` },
+    { key: 'save_frames', rms: true, type: 'bool' },
+    { key: 'sessions', label: 'capture sessions per night', min: 1, max: 6, step: 0.1, unit: '',
+      hint: () => 'every restart starts another captured and archived directory — the *_dirs_to_keep limits count directories' },
+
+    { group: 'Kept by age or count', note: '0 keeps everything. These run first, at every capture start.' },
+    { key: 'video_days_to_keep', rms: true, min: 0, max: 60, step: 1, unit: 'days' },
+    { key: 'frame_days_to_keep', rms: true, min: 0, max: 60, step: 1, unit: 'days' },
+    { key: 'times_days_to_keep', rms: true, min: 0, max: 60, step: 1, unit: 'days' },
+    { key: 'capt_dirs_to_keep', rms: true, min: 0, max: 60, step: 1, unit: 'dirs' },
+    { key: 'arch_dirs_to_keep', rms: true, min: 0, max: 120, step: 1, unit: 'dirs' },
+    { key: 'bz2_files_to_keep', rms: true, min: 0, max: 240, step: 1, unit: 'files', hint: () => `${fmt(P.bz2_files_per_session, 0)} files per night directory` },
+    { key: 'logdays_to_keep', rms: true, min: 0, max: 120, step: 1, unit: 'days' },
+
+    { group: 'Quotas', note: 'Per station, in GB, only with quota management on and all five set. CapturedFiles gets what is left of rms_data_quota.' },
+    { key: 'quota_management_enabled', rms: true, type: 'bool' },
+    { key: 'rms_data_quota', rms: true, min: 0, max: perStation, step: 1, unit: 'GB', nullable: true },
+    { key: 'continuous_capture_quota', rms: true, min: 0, max: perStation, step: 1, unit: 'GB', nullable: true, hint: () => 'video, frames and frame times together' },
+    { key: 'arch_dir_quota', rms: true, min: 0, max: 200, step: 1, unit: 'GB', nullable: true },
+    { key: 'bz2_files_quota', rms: true, min: 0, max: 200, step: 1, unit: 'GB', nullable: true },
+    { key: 'log_files_quota', rms: true, min: 0, max: 5, step: 0.1, unit: 'GB', nullable: true },
+    { derived: 'allowance' },
+
+    { group: 'Reserve for the next capture', note: 'At capture start RMS frees space until this much is free on the disk: FF files, raw video, 3 GB of frames, plus:' },
+    { key: 'extra_space_gb', rms: true, min: 0, max: 300, step: 1, unit: 'GB' },
+    { derived: 'reserve' },
+
+    { group: 'Per night, per station', note: 'Measured from the last few nights on disk; move them to try other cameras.' },
+    { key: 'captured_gb', label: 'CapturedFiles', min: 0, max: 100, step: 0.5, unit: 'GB', measured: true },
+    { key: 'archived_gb', label: 'ArchivedFiles', min: 0, max: 5, step: 0.05, unit: 'GB', measured: true },
+    { key: 'bz2_gb', label: 'bz2 archives', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
+    { key: 'frames_gb', label: 'FramesFiles (processed)', min: 0, max: 2, step: 0.01, unit: 'GB', measured: true },
+    { key: 'times_gb', label: 'TimeFiles', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
+    { key: 'logs_gb', label: 'logs', min: 0, max: 0.5, step: 0.005, unit: 'GB', measured: true },
+
+    { group: 'Disk' },
+    { key: 'stations', label: 'stations on this disk', min: 1, max: 16, step: 1, unit: '' },
+    { key: 'disk_gb', label: 'disk size', min: 100, max: Math.max(20000, Math.ceil((d.total_gb || 0) * 2)), step: 10, unit: 'GB' },
+    { key: 'other_gb', label: 'other data on the disk', min: 0, max: 2000, step: 10, unit: 'GB' },
+  ];
+}
+
+function majority(values) {
+  const m = new Map();
+  for (const v of values) { const k = JSON.stringify(v); m.set(k, (m.get(k) || 0) + 1); }
+  return JSON.parse([...m.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+}
+
+function initParams(keepMeasuredEdits) {
+  const d = inputs.disks[diskIdx];
+  const st = d.stations;
+  const s0 = st[0];
+  orig = {};
+  for (const k of Object.keys(inputs.options)) orig[k] = majority(st.map((s) => s.settings[k]));
+  const avg = (k, dflt) => { const v = st.map((s) => s.measured && s.measured[k]).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : dflt; };
+  const prev = P;
+  P = { ...orig, mbps: orig.raw_video_bitrate_mbps,
+    stations: st.length, disk_gb: Math.round(d.total_gb || 1000), other_gb: 0,
+    night_hours: s0.night_hours, ff_gb: s0.ff_gb,
+    sessions: +avg('sessions', 1).toFixed(1), bz2_files_per_session: Math.round(avg('bz2_files_per_session', 2)),
+    captured_gb: +avg('captured_gb', 15).toFixed(1), archived_gb: +avg('archived_gb', 0.5).toFixed(2),
+    bz2_gb: +avg('bz2_gb', 0.2).toFixed(2), frames_gb: +avg('frames_gb', 0.1).toFixed(2),
+    times_gb: +avg('times_gb', 0.01).toFixed(3), logs_gb: +avg('logs_gb', 0.01).toFixed(3) };
+  delete P.raw_video_bitrate_mbps;
+  // a fresh measurement only moves the size sliders nobody touched
+  const MEASURED = ['sessions', 'bz2_files_per_session', 'captured_gb', 'archived_gb', 'bz2_gb', 'frames_gb', 'times_gb', 'logs_gb'];
+  if (keepMeasuredEdits && prev) for (const k of Object.keys(prev)) if (!MEASURED.includes(k) || edited.has(k)) P[k] = prev[k];
+  if (!keepMeasuredEdits) edited = new Set();
+}
+
+function rmsKey(key) { return key === 'mbps' ? 'raw_video_bitrate_mbps' : (key in inputs.options ? key : null); }
+
+function renderControls() {
+  const d = inputs.disks[diskIdx];
+  const box = $('controls');
+  box.replaceChildren();
+  let grp = null;
+  for (const c of controlSpec(d)) {
+    if (c.group) {
+      grp = el('div', 'grp'); grp.append(el('h3', '', c.group));
+      if (c.note) grp.append(el('p', '', c.note));
+      box.append(grp); continue;
+    }
+    if (c.derived) { const x = el('div', 'derived'); x.dataset.derived = c.derived; grp.append(x); continue; }
+    const rk = c.rms ? rmsKey(c.key) : null;
+    const wrap = el('div', 'ctl'); wrap.dataset.key = c.key;
+    const row = el('div', 'row');
+    const name = el('span', 'name' + (rk ? '' : ' plain'), c.label || c.key);
+    name.title = rk ? `${rk} in [${inputs.section}]` : `${c.label || c.key} — simulation only, not written to the files`;
+    row.append(name);
+    let range = null, num = null, chk = null, setBox = null;
+    if (c.type === 'bool') {
+      chk = el('input'); chk.type = 'checkbox'; chk.checked = !!P[c.key];
+      chk.onchange = () => { P[c.key] = chk.checked; update(); };
+      row.append(chk);
+    } else {
+      if (c.nullable) {
+        setBox = el('input'); setBox.type = 'checkbox'; setBox.checked = P[c.key] != null; setBox.title = 'set (unchecked: not in the file — RMS default applies)';
+        row.append(setBox);
+      }
+      num = el('input'); num.type = 'number'; num.min = c.min; num.max = c.max; num.step = c.step;
+      row.append(num, el('span', 'unit', c.unit || ''));
+      range = el('input'); range.type = 'range'; range.min = c.min; range.max = c.max; range.step = c.step;
+      const val = () => P[c.key] == null ? 0 : P[c.key];
+      num.value = val(); range.value = val();
+      const set = (v) => {
+        if (!isFinite(v)) return;
+        P[c.key] = v; if (setBox) setBox.checked = true;
+        if (c.measured) edited.add(c.key);
+        num.value = v; range.value = v; update();
+      };
+      range.oninput = () => set(parseFloat(range.value));
+      num.onchange = () => set(parseFloat(num.value));
+      if (setBox) setBox.onchange = () => { P[c.key] = setBox.checked ? parseFloat(num.value) || 0 : null; update(); };
+    }
+    wrap.append(row);
+    if (range) wrap.append(range);
+    if (c.hint) { const h = el('div', 'hint'); h.dataset.hint = '1'; wrap.append(h); wrap._hint = c.hint; }
+    if (rk) {
+      const vals = d.stations.map((s) => s.settings[rk]);
+      if (new Set(vals.map((v) => JSON.stringify(v))).size > 1) {
+        const w = el('div', 'differs', 'stations differ: ' + d.stations.map((s) => `${s.id} ${s.settings[rk] ?? '–'}`).join(', ') + ' — simulated at the most common');
+        wrap.append(w);
+      }
+      if (!d.stations.every((s) => s.present[rk])) {
+        const w = el('div', 'hint', 'not in every file — RMS default ' + JSON.stringify(inputs.options[rk]));
+        wrap.append(w);
+      }
+    }
+    wrap._spec = c;
+    grp.append(wrap);
+  }
+}
+
+function syncControls() {
+  for (const wrap of document.querySelectorAll('.ctl')) {
+    const c = wrap._spec;
+    const rk = c.rms ? rmsKey(c.key) : null;
+    wrap.classList.toggle('changed', !!rk && JSON.stringify(P[c.key]) !== JSON.stringify(orig[rk]));
+    wrap.classList.toggle('off', P[c.key] == null && c.nullable);
+    if (wrap._hint) wrap.querySelector('[data-hint]').textContent = wrap._hint();
+  }
+  const quotaCtl = ['rms_data_quota', 'continuous_capture_quota', 'arch_dir_quota', 'bz2_files_quota', 'log_files_quota'];
+  for (const k of quotaCtl) { const w = document.querySelector(`.ctl[data-key="${k}"]`); if (w && !P.quota_management_enabled) w.classList.add('off'); }
+}
+
+// --- simulation & results -----------------------------------------------
+
+const CATS = [
+  { k: 'video', label: 'Raw video', unit: 'days', target: 'video_days_to_keep' },
+  { k: 'capt', label: 'CapturedFiles', unit: 'nights', target: 'capt_dirs_to_keep', perNight: () => P.sessions },
+  { k: 'arch', label: 'ArchivedFiles', unit: 'nights', target: 'arch_dirs_to_keep', perNight: () => P.sessions },
+  { k: 'bz2', label: 'bz2 archives', unit: 'nights', target: 'bz2_files_to_keep', perNight: () => P.sessions * P.bz2_files_per_session },
+  { k: 'frames', label: 'FramesFiles', unit: 'days', target: 'frame_days_to_keep' },
+  { k: 'times', label: 'TimeFiles', unit: 'days', target: 'times_days_to_keep' },
+  { k: 'logs', label: 'Logs', unit: 'days', target: 'logdays_to_keep' },
+];
+
+function horizon() {
+  const t = CATS.map((c) => (P[c.target] || 0) / (c.perNight ? c.perNight() : 1));
+  return Math.min(240, Math.max(45, Math.ceil(Math.max(...t) * 2 + 14)));
+}
+
+function update() {
+  const r = StorageSim.simulate(P, horizon());
+  syncControls();
+  const allow = r.captured_allowance;
+  const a = document.querySelector('[data-derived=allowance]');
+  if (a) a.replaceChildren('CapturedFiles allowance: ', allow == null ? el('b', '', 'not managed (quota management off or a quota unset)')
+    : el('b', allow <= 0 ? 'bad' : '', allow <= 0 ? `${fmt(allow, 1)} GB — RMS treats this as “not managed”` : `${fmt(allow, 1)} GB`));
+  const rv = document.querySelector('[data-derived=reserve]');
+  if (rv) rv.replaceChildren('Reserved per station: ', el('b', '', `${fmt(r.need)} GB`),
+    ` (FF ${fmt(P.ff_gb)} + video ${fmt(r.vday)} + frames ${P.save_frames ? 3 : 0} + extra ${fmt(P.extra_space_gb)})`);
+  renderResults(r);
+  const changes = pendingChanges();
+  $('apply').disabled = !changes.length;
+  $('apply').textContent = changes.length ? `Apply ${changes.length} change${changes.length > 1 ? 's' : ''} to stations` : 'Apply to stations';
+}
+
+function describeRule(rule) {
+  if (rule === 'free space') return 'free-space loop (the next capture needs room)';
+  return rule;
+}
+
+function renderResults(r) {
+  const main = $('results');
+  main.replaceChildren();
+  const tiles = el('div', 'tiles');
+  const tile = (k, v, s, bad) => { const t = el('div', 'tile' + (bad ? ' bad' : '')); t.append(el('div', 'k', k), el('div', 'v', v), el('div', 's', s)); tiles.append(t); };
+  const kv = r.kept.video, kc = r.kept.capt;
+  const dp = (v, d) => Math.abs(v - Math.round(v)) < 0.05 ? 0 : d;
+  const range = (x, d = 1) => Math.abs(x.max - x.min) < 0.05 ? fmt(x.min, dp(x.min, d)) : `${fmt(x.min, dp(x.min, d))}–${fmt(x.max, dp(x.max, d))}`;
+  tile('Raw video kept', P.raw_video_save && P.mbps ? range(kv) + ' d' : '–', P.raw_video_save && P.mbps ? `${fmt(r.vday)} GB per station per day` : 'raw_video_save off or no bitrate');
+  tile('Captured nights kept', range(kc, 0), `${fmt(P.captured_gb, 1)} GB per night per station`);
+  const peakPct = 100 * r.peak_gb / P.disk_gb;
+  tile('Disk at its fullest', fmt(peakPct) + '%', `${fmt(r.peak_gb)} of ${fmt(P.disk_gb)} GB, just before cleanup`, peakPct > 99);
+  tile('Capture lost to a full disk', r.lost_per_day > 0.5 ? fmt(r.lost_per_day) + ' GB/day' : 'none', r.lost_per_day > 0.5 ? `on ${r.overflow_days} of the last 14 days` : 'in steady state', r.lost_per_day > 0.5);
+  main.append(tiles);
+
+  // retention
+  const card = el('section', 'card');
+  card.append(el('h2', '', 'What each kind of data keeps'), el('p', 'sub', `In steady state, just after cleanup, per station (a range when stations fare differently). The white tick is what the *_to_keep option asks for; the text says which rule actually deletes it.`));
+  const grid = el('div', 'ret');
+  const rows = CATS.filter((c) => !(c.k === 'video' && !(P.raw_video_save && P.mbps)) && !(c.k === 'frames' && !P.save_frames));
+  const targetOf = (c) => P[c.target] > 0 ? P[c.target] / (c.perNight ? c.perNight() : 1) : null;
+  const maxX = Math.max(1, ...rows.map((c) => Math.max(r.kept[c.k].max, targetOf(c) || 0))) * 1.05;
+  for (const c of rows) {
+    const k = r.kept[c.k], tgt = targetOf(c);
+    const lab = el('div', 'lab', c.label);
+    lab.append(el('small', '', c.target + (P[c.target] > 0 ? ` ${P[c.target]}` : ' 0 (keep all)')));
+    const bar = el('div', 'bar');
+    bar.append(el('div', 'track'));
+    const f = el('div', 'fill'); f.style.width = (100 * k.min / maxX) + '%'; bar.append(f);
+    if (k.max - k.min > 0.05) { const g = el('div', 'range'); g.style.left = (100 * k.min / maxX) + '%'; g.style.width = (100 * (k.max - k.min) / maxX) + '%'; bar.append(g); }
+    if (tgt != null) { const t = el('div', 'target'); t.style.left = `calc(${100 * tgt / maxX}% - 1px)`; t.title = `${c.target}: ${fmt(tgt, 1)} ${c.unit}`; bar.append(t); }
+    bar.title = `${c.label}: ${range(k)} ${c.unit} kept`;
+    const why = el('div', 'why');
+    const rules = r.binding[c.k] || [];
+    why.append(el('b', '', `${range(k)} ${c.unit}`), ' · ');
+    if (!rules.length) why.append(el('span', '', `nothing deleted in ${r.days} simulated days`));
+    else {
+      const short = tgt != null && k.min < tgt - 0.5 && !rules.includes(c.target);
+      why.append(el('span', short ? 'short' : '', (short ? 'cut short by ' : 'limited by ') + rules.map(describeRule).join(' and ')));
+    }
+    grid.append(lab, bar, why);
+  }
+  card.append(grid);
+  main.append(card);
+
+  // disk over time
+  const dc = el('section', 'card');
+  dc.append(el('h2', '', 'The shared disk, day by day'), el('p', 'sub', `All ${r.stations} stations from an empty disk: stacked is what remains after each day's cleanup; the line is the fullest point, just before the next cleanup.`));
+  const lg = el('div', 'legend');
+  for (const [lbl, v, cls] of [['raw video', '--s-video'], ['CapturedFiles', '--s-capt'], ['everything else', '--s-other'], ['fullest point', '--text', 'line'], ['disk size', '--muted', 'line']]) {
+    const s = el('span', cls || '', lbl); s.style.setProperty('--c', `var(${v})`); lg.append(s);
+  }
+  dc.append(lg);
+  const ch = el('div'); ch.id = 'chart'; dc.append(ch);
+  main.append(dc);
+  drawChart(ch, r);
+  const det = el('details');
+  det.append(el('summary', '', 'table view'));
+  const tb = el('table', 'data');
+  const hr = el('tr'); for (const h of ['day', 'raw video', 'captured', 'else', 'after cleanup', 'fullest', 'lost']) hr.append(el('th', '', h)); tb.append(hr);
+  for (const d of r.series) {
+    const tr = el('tr');
+    for (const v of [d.day + 1, d.after.video, d.after.capt, d.after.total - d.after.video - d.after.capt, d.after.total, d.peak, d.lost]) tr.append(el('td', '', typeof v === 'number' ? fmt(v) : v));
+    tb.append(tr);
+  }
+  det.append(tb); dc.append(det);
+
+  // findings
+  const fs = findings(r);
+  if (fs.length) {
+    const fc = el('section', 'card');
+    fc.append(el('h2', '', 'Findings'));
+    const ul = el('ul', 'find');
+    for (const [sev, text] of fs) { const li = el('li'); li.append(el('span', 'sev ' + sev, sev === 'bad' ? '⚠ problem' : sev === 'warn' ? '△ note' : 'ℹ'), text); ul.append(li); }
+    fc.append(ul);
+    main.append(fc);
+  }
+
+  const ch2 = pendingChanges();
+  if (ch2.length) {
+    const pc = el('section', 'card');
+    pc.append(el('h2', '', 'Changes to apply'), el('p', 'sub', `Written to the stations on ${inputs.disks[diskIdx].mount || 'this disk'} whose value differs, each file backed up first.`));
+    const ul = el('ul', 'find');
+    for (const c of ch2) { const li = el('li'); li.append(el('code', '', c.option), `  ${c.from} → ${c.to}`); ul.append(li); }
+    pc.append(ul);
+    main.append(pc);
+  }
+}
+
+function findings(r) {
+  const out = [];
+  if (r.lost_per_day > 0.5) out.push(['bad', `The disk fills during capture: about ${fmt(r.lost_per_day)} GB a day cannot be written. Every station checks the shared disk's free space as if it were alone, so ${r.stations} stations can each see enough room and together write more than there is. Keep sum(rms_data_quota) + sum(reserve) = ${fmt(r.stations * (P.rms_data_quota || 0) + r.stations * r.need)} GB below the ${fmt(P.disk_gb - P.other_gb)} GB usable.`]);
+  const freeCats = Object.entries(r.binding).filter(([, rules]) => rules.includes('free space')).map(([c]) => c);
+  if (freeCats.includes('capt') || freeCats.includes('arch')) out.push(['warn', 'The free-space loop is deleting captured or archived nights: it takes one of each kind of data per round, not just raw video. Lower the quotas (or extra_space_gb) so the quotas do the deleting.']);
+  else if (freeCats.length) out.push(['warn', `The free-space loop does part of the deleting (${freeCats.join(', ')}), not the quotas, and hits the stations unevenly: the first to start frees the room the others then see. Lower rms_data_quota / continuous_capture_quota until the quotas do it.`]);
+  if (r.quota_on && r.captured_allowance <= 0) out.push(['bad', 'rms_data_quota minus the other quotas leaves nothing for CapturedFiles: RMS logs a warning and stops managing it by quota.']);
+  if (r.quota_on && P.continuous_capture_quota === 0 && (P.raw_video_save || P.save_frames)) out.push(['bad', 'continuous_capture_quota 0 deletes all raw video, frames and frame times at every start (objectsToDeleteByTime has no "0 = off").']);
+  if (r.quota_on && P.log_files_quota === 0) out.push(['bad', 'log_files_quota 0 deletes every log at each start.']);
+  if (P.quota_management_enabled && !r.quota_on) out.push(['warn', 'quota_management_enabled is on but a quota is unset: RMS disables quota management entirely.']);
+  if (P.raw_video_save && !P.mbps) out.push(['warn', 'No raw_video_bitrate_mbps: RMS estimates the video from the last days on disk, which lags any camera change. Declare it to simulate video.']);
+  if (P.sessions > 1.2) out.push(['info', `${fmt(P.sessions, 1)} capture sessions per night: each restart is another captured and archived directory, so capt_dirs_to_keep ${P.capt_dirs_to_keep} is only ${fmt(P.capt_dirs_to_keep / P.sessions, 1)} nights.`]);
+  return out;
+}
+
+function drawChart(box, r) {
+  const W = Math.max(320, box.clientWidth || 700), H = 260, m = { l: 52, r: 12, t: 10, b: 26 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const n = r.series.length;
+  const ymax = Math.max(P.disk_gb, ...r.series.map((d) => d.peak)) * 1.05;
+  const x = (i) => m.l + (n <= 1 ? 0 : i * iw / (n - 1));
+  const y = (v) => m.t + ih - v / ymax * ih;
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'disk use per day' });
+  // grid
+  const ticks = niceTicks(ymax);
+  for (const t of ticks) {
+    svg.append(svgEl('line', { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: 'var(--line2)', 'stroke-width': 1 }));
+    const tx = svgEl('text', { x: m.l - 6, y: y(t) + 4, 'text-anchor': 'end' }); tx.textContent = t >= 1000 ? fmt(t / 1000, t % 1000 ? 1 : 0) + ' TB' : fmt(t) + ' GB'; svg.append(tx);
+  }
+  const step = Math.max(1, Math.ceil(n / 10 / 7) * 7);
+  for (let i = 0; i < n; i += step) { const tx = svgEl('text', { x: x(i), y: H - 8, 'text-anchor': 'middle' }); tx.textContent = 'day ' + (i + 1); svg.append(tx); }
+  // stacked areas (2px surface gap between fills via stroke)
+  const layers = [['video', 'var(--s-video)', (d) => d.after.video], ['capt', 'var(--s-capt)', (d) => d.after.capt], ['other', 'var(--s-other)', (d) => d.after.total - d.after.video - d.after.capt]];
+  let base = r.series.map(() => 0);
+  for (const [, color, f] of layers) {
+    const top = r.series.map((d, i) => base[i] + Math.max(0, f(d)));
+    let dpath = `M${x(0)},${y(top[0])}`;
+    for (let i = 1; i < n; i++) dpath += `L${x(i)},${y(top[i])}`;
+    for (let i = n - 1; i >= 0; i--) dpath += `L${x(i)},${y(base[i])}`;
+    svg.append(svgEl('path', { d: dpath + 'Z', fill: color, stroke: 'var(--tile)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    base = top;
+  }
+  // disk size and fullest-point line
+  svg.append(svgEl('line', { x1: m.l, x2: W - m.r, y1: y(P.disk_gb), y2: y(P.disk_gb), stroke: 'var(--muted)', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+  const dl = svgEl('text', { x: W - m.r - 4, y: y(P.disk_gb) - 5, 'text-anchor': 'end' }); dl.textContent = `disk ${fmt(P.disk_gb)} GB`; svg.append(dl);
+  let pk = ''; r.series.forEach((d, i) => { pk += (i ? 'L' : 'M') + x(i) + ',' + y(d.peak); });
+  svg.append(svgEl('path', { d: pk, fill: 'none', stroke: 'var(--text)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  // days with lost capture
+  r.series.forEach((d, i) => { if (d.lost > 0.5) svg.append(svgEl('circle', { cx: x(i), cy: y(d.peak), r: 4, fill: 'var(--bad)', stroke: 'var(--tile)', 'stroke-width': 2 })); });
+  // hover
+  const cross = svgEl('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--muted)', 'stroke-width': 1, visibility: 'hidden' });
+  svg.append(cross);
+  const hit = svgEl('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' });
+  svg.append(hit);
+  box.replaceChildren(svg);
+  const tip = el('div'); tip.id = 'tip'; box.append(tip);
+  hit.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * W / rect.width;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / iw * (n - 1))));
+    const d = r.series[i];
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+    const row = (sw, k, v) => { const rr = el('div', 'r'); const kk = el('span'); if (sw) { const s = el('span', 'sw'); s.style.background = sw; kk.append(s); } kk.append(k); rr.append(kk, el('span', '', v)); return rr; };
+    tip.replaceChildren(el('div', '', `day ${d.day + 1}`),
+      row('var(--s-video)', 'raw video', fmt(d.after.video) + ' GB'),
+      row('var(--s-capt)', 'CapturedFiles', fmt(d.after.capt) + ' GB'),
+      row('var(--s-other)', 'everything else', fmt(d.after.total - d.after.video - d.after.capt) + ' GB'),
+      row('', 'after cleanup', fmt(d.after.total) + ' GB'),
+      row('', 'fullest', fmt(d.peak) + ' GB'),
+      row('', 'free at its fullest', fmt(P.disk_gb - P.other_gb - d.peak) + ' GB'));
+    if (d.lost > 0.5) tip.append(row('var(--bad)', 'not written (disk full)', fmt(d.lost) + ' GB'));
+    tip.style.display = 'block';
+    const bx = box.getBoundingClientRect();
+    const left = e.clientX - bx.left + 14;
+    tip.style.left = Math.min(left, bx.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = Math.max(0, e.clientY - bx.top - tip.offsetHeight / 2) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.setAttribute('visibility', 'hidden'); });
+}
+
+function niceTicks(max) {
+  const raw = max / 5, p = 10 ** Math.floor(Math.log10(raw)), s = [1, 2, 2.5, 5, 10].map((k) => k * p).find((k) => k >= raw);
+  const out = []; for (let v = 0; v <= max; v += s) out.push(v); return out;
+}
+
+// --- apply ---------------------------------------------------------------
+
+function toFile(key, v) {
+  if (v == null) return null;
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (/_to_keep$/.test(key)) return String(Math.round(v));
+  return String(+Number(v).toFixed(3));
+}
+
+function pendingChanges() {
+  if (!inputs) return [];
+  const d = inputs.disks[diskIdx];
+  const out = [];
+  for (const rk of Object.keys(inputs.options)) {
+    const key = rk === 'raw_video_bitrate_mbps' ? 'mbps' : rk;
+    // only what was moved: stations that merely differ from the majority stay as they are
+    if (JSON.stringify(P[key]) === JSON.stringify(orig[rk])) continue;
+    const want = toFile(rk, P[key]);
+    const values = {};
+    const from = new Set();
+    for (const s of d.stations) {
+      const have = toFile(rk, s.settings[rk]);
+      const inFile = s.present[rk];
+      if (want === null ? inFile : (!inFile || have !== want)) { values[s.id] = want; from.add(inFile ? have : 'unset'); }
+    }
+    if (Object.keys(values).length) out.push({ option: rk, values, from: [...from].join(' / '), to: want ?? 'unset' });
+  }
+  return out;
+}
+
+async function apply() {
+  const ch = pendingChanges();
+  if (!ch.length) return;
+  const d = inputs.disks[diskIdx];
+  if (!confirm(`Write ${ch.length} option(s) to ${d.stations.map((s) => s.id).join(', ')}?\n\n` + ch.map((c) => `${c.option}: ${c.from} → ${c.to}`).join('\n') + '\n\nEach file is backed up first. RMS picks the values up at its next capture start.')) return;
+  $('apply').disabled = true;
+  try {
+    for (const c of ch) {
+      const r = await fetch('/api/set', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section: inputs.section, option: c.option, values: c.values }) });
+      const payload = await r.json();
+      if (!r.ok) throw new Error(payload.error || r.statusText);
+    }
+    toast(`${ch.length} option(s) written`);
+    await load(true);
+  } catch (e) { alert('Failed: ' + e.message); update(); }
+}
+
+function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2500); }
+
+// --- loading ---------------------------------------------------------------
+
+async function fetchInputs(refresh) {
+  const r = await fetch('/api/storage-sim' + (refresh ? '?refresh=1' : ''), { cache: 'no-store' });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function measuredStatus() {
+  const d = inputs.disks[diskIdx];
+  const ats = d.stations.map((s) => s.measured_at).filter(Boolean);
+  if (inputs.measuring) return 'measuring the per-night sizes…';
+  if (!ats.length) return 'not measured yet — using rough defaults';
+  const age = (Date.now() / 1000 - Math.min(...ats)) / 60;
+  return 'sizes measured ' + (age < 1 ? 'just now' : age < 90 ? Math.round(age) + ' min ago' : Math.round(age / 60) + ' h ago');
+}
+
+async function load(afterApply, refresh, given) {
+  try { inputs = given || await fetchInputs(refresh); }
+  catch (e) { $('results').replaceChildren(el('div', 'meta', 'failed: ' + e.message)); return; }
+  if (!inputs.disks.length) { $('results').replaceChildren(el('div', 'meta', 'no stations found')); return; }
+  const sel = $('disk');
+  sel.replaceChildren(...inputs.disks.map((d, i) => { const o = el('option', '', `${d.mount || '?'} · ${d.stations.length} station${d.stations.length > 1 ? 's' : ''}`); o.value = i; return o; }));
+  diskIdx = Math.min(diskIdx, inputs.disks.length - 1); sel.value = diskIdx;
+  sel.style.display = inputs.disks.length > 1 ? '' : 'none';
+  initParams(!afterApply && P != null);
+  renderControls();
+  update();
+  $('mstatus').textContent = measuredStatus();
+  if (inputs.measuring) setTimeout(() => poll(), 3000);
+}
+
+async function poll() {
+  try {
+    const fresh = await fetchInputs(false);
+    const wasMeasuring = inputs.measuring;
+    if (fresh.measuring) { inputs.measuring = true; $('mstatus').textContent = measuredStatus(); setTimeout(poll, 3000); return; }
+    if (wasMeasuring) { inputs = fresh; initParams(true); renderControls(); update(); $('mstatus').textContent = measuredStatus(); }
+  } catch (e) { setTimeout(poll, 5000); }
+}
+
+$('disk').onchange = () => { diskIdx = +$('disk').value; P = null; initParams(false); renderControls(); update(); $('mstatus').textContent = measuredStatus(); };
+$('reset').onclick = () => { initParams(false); renderControls(); update(); };
+$('apply').onclick = apply;
+$('remeasure').onclick = () => load(false, true);
+let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(update, 150); });
+load(false, false, INITIAL);
+</script>
+</body>
+</html>

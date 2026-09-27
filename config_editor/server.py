@@ -43,11 +43,17 @@ class EditorHandler(BaseHTTPRequestHandler):
                         self.fleet.reload()
                     payload = self.fleet.audit()
                 self._send_json(200, payload)
-            elif path == "/api/storage":
+            elif path == "/storage":
+                self._send_storage_page()
+            elif path == "/storage-sim.js":
+                self._send_static("storage-sim.js", "text/javascript; charset=utf-8")
+            elif path == "/api/storage-sim":
+                refresh = "refresh=1" in (urlparse(self.path).query or "")
                 with self.lock:
                     if self.fleet.changed_on_disk():
                         self.fleet.reload()
-                    payload = storage.plan(self.fleet)
+                    storage.measure_in_background(self.fleet, force=refresh)
+                    payload = storage.sim_inputs(self.fleet)
                 self._send_json(200, payload)
             else:
                 self._send_error(404, "not found")
@@ -97,6 +103,17 @@ class EditorHandler(BaseHTTPRequestHandler):
         blob = json.dumps(payload).replace("</", "<\\/")
         html = target.read_text(encoding="utf-8").replace(
             "/*__STATE__*/null", blob, 1)
+        self._respond(200, "text/html; charset=utf-8", html.encode("utf-8"))
+
+    def _send_storage_page(self) -> None:
+        """storage.html with the simulator inputs embedded, like the editor page."""
+        with self.lock:
+            if self.fleet.changed_on_disk():
+                self.fleet.reload()
+            storage.measure_in_background(self.fleet)
+            payload = storage.sim_inputs(self.fleet)
+        blob = json.dumps(payload).replace("</", "<\\/")
+        html = (STATIC_DIR / "storage.html").read_text(encoding="utf-8").replace("/*__SIM__*/null", blob, 1)
         self._respond(200, "text/html; charset=utf-8", html.encode("utf-8"))
 
     def _send_state(self) -> None:
@@ -202,6 +219,7 @@ def serve(fleet: Fleet, host: str, port: int) -> None:
         backup_done=set(),
         version=code_version(REPO_DIR),
     )
+    storage.measure_in_background(fleet)   # warm the Storage page's per-night sizes
     httpd = ThreadingHTTPServer((host, port), handler)
     shown = host if host not in ("0.0.0.0", "") else "localhost"
     print("Config editor: http://%s:%d" % (shown, port))

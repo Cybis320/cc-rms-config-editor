@@ -120,3 +120,52 @@ def test_disk_of_walks_up_to_an_existing_dir(tmp_path):
     d = storage.disk_of(str(tmp_path / "not" / "yet"))
     assert d is not None and d["total_gb"] > 0
     assert d["key"] == storage.disk_of(str(tmp_path))["key"]
+
+
+def _write(path, nbytes):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\0" * nbytes)
+
+
+def test_measure_per_night_sizes(tmp_path):
+    data = tmp_path / "RMS_data" / "XX0001"
+    MB = 1024 ** 2
+    # six nights, the 3rd restarted once (two directories); the newest dir is still filling
+    nights = ["20260920_020000_1", "20260921_020000_1", "20260922_020000_1", "20260922_060000_1",
+              "20260923_020000_1", "20260924_020000_1", "20260925_020000_1"]
+    for i, n in enumerate(nights):
+        _write(data / "CapturedFiles" / ("XX0001_" + n) / "FF.fits", 10 * MB if i < len(nights) - 1 else 1 * MB)
+        _write(data / "ArchivedFiles" / ("XX0001_" + n) / "a.fits", 2 * MB)
+        _write(data / "ArchivedFiles" / ("XX0001_%s_imgdata.tar.bz2" % n), 1 * MB)
+        _write(data / "ArchivedFiles" / ("XX0001_%s_metadata.tar.bz2" % n), 1 * MB)
+    for d in ("20260921", "20260922", "20260923", "20260924", "20260925"):
+        _write(data / "FramesFiles" / ("XX0001_%s-020000_to_%s-120000_frames_timelapse.tar" % (d, d)), 3 * MB)
+    m = storage.measure(str(data), "XX0001", {})
+    assert m["sessions"] == pytest.approx(7 / 6)
+    assert m["captured_gb"] == pytest.approx(10 * MB / GB * 7 / 6)          # per night, both sessions
+    assert m["archived_gb"] == pytest.approx(2 * MB / GB * 7 / 6)
+    assert m["bz2_gb"] == pytest.approx(2 * MB / GB * 7 / 6)
+    assert m["bz2_files_per_session"] == 2
+    assert m["frames_gb"] == pytest.approx(3 * MB / GB)
+    assert m["times_gb"] is None and m["logs_gb"] is None                    # nothing there
+
+
+def test_sim_inputs_and_background_measure(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "MEASURE_CACHE", tmp_path / "measured.json")
+    monkeypatch.setattr(storage, "_measured", None)
+    fleet, disk = fleet_of(tmp_path, n=2)
+    fleet.apply("Capture", "capt_dirs_to_keep", {"US005A": "14"}, backup=False)
+    r = storage.sim_inputs(fleet, disk)
+    g = r["disks"][0]
+    assert len(g["stations"]) == 2 and g["total_gb"] == 7392
+    a, b = g["stations"]
+    assert a["measured"] is None                                             # not measured yet
+    assert a["settings"]["raw_video_bitrate_mbps"] == 27 and a["settings"]["continuous_capture"] is True
+    assert a["settings"]["capt_dirs_to_keep"] == 14 and b["settings"]["capt_dirs_to_keep"] == 8   # RMS default
+    assert a["present"]["capt_dirs_to_keep"] and not b["present"]["capt_dirs_to_keep"]
+    assert storage.stale(fleet)
+    storage.measure_all(fleet)
+    assert not storage.stale(fleet)
+    r = storage.sim_inputs(fleet, disk)
+    assert r["disks"][0]["stations"][0]["measured"] is not None
+    assert (tmp_path / "measured.json").is_file()
