@@ -222,3 +222,12 @@ def test_stills_options_reach_the_simulator(tmp_path):
     assert st["settings"]["frame_file_type"] == "png"                   # as RMS reads it: lower-cased
     assert st["settings"]["frame_save_aligned_interval"] == 5.0 and not st["present"]["frame_save_aligned_interval"]
     assert (st["width"], st["height"]) == (1920, 1080)
+
+
+def test_disk_size_excludes_the_root_reserve(tmp_path):
+    import os
+    d = storage.disk_of(str(tmp_path))
+    st = os.statvfs(tmp_path)
+    used = (st.f_blocks - st.f_bfree) * st.f_frsize / GB
+    assert d["total_gb"] == pytest.approx(used + d["free_gb"], rel=1e-6)    # what RMS can fill
+    assert d["reserved_gb"] == pytest.approx((st.f_bfree - st.f_bavail) * st.f_frsize / GB)

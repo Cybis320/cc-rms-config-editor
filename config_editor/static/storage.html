@@ -190,7 +190,7 @@ function controlSpec(d) {
 
     { group: 'Disk' },
     { key: 'stations', label: 'stations on this disk', min: 1, max: 16, step: 1, unit: '' },
-    { key: 'disk_gb', label: 'disk size', min: 100, max: Math.max(20000, Math.ceil((d.total_gb || 0) * 2)), step: 10, unit: 'GB' },
+    { key: 'disk_gb', label: 'disk size RMS can fill', hint: () => d.reserved_gb ? `the filesystem keeps another ${fmt(d.reserved_gb)} GB for root, which RMS cannot write to` : '', min: 100, max: Math.max(20000, Math.ceil((d.total_gb || 0) * 2)), step: 10, unit: 'GB' },
     { key: 'other_gb', label: 'other data on the disk', min: 0, max: 2000, step: 10, unit: 'GB' },
   ];
 }
@@ -375,7 +375,7 @@ function syncControls() {
 // --- auto-tune -------------------------------------------------------------
 // Raw video and CapturedFiles are the science that is not uploaded and is lost on
 // deletion; everything else gets a fixed number of days. See StorageSim.autotune.
-const T = { capt_nights: null, nice_days: 14, log_days: 30, margin: 3, said: null, live: false, range: null, rangeKey: null };
+const T = { capt_nights: null, nice_days: 14, log_days: 30, margin: 5, said: null, live: false, range: null, rangeKey: null };
 
 const tuneOpts = (n) => ({ nice_days: T.nice_days, log_days: T.log_days, margin: T.margin / 100, capt_nights: n });
 

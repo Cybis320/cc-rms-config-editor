@@ -90,10 +90,13 @@ def camera_bitrate_mbps(config_dir: Path, settings_path: str | None) -> float | 
 
 
 def disk_of(path: str) -> dict | None:
-    """``{key, mount, total_gb, free_gb}`` for the filesystem holding ``path``.
+    """``{key, mount, total_gb, free_gb, reserved_gb}`` for the filesystem holding ``path``.
 
-    Walks up to the nearest existing directory (a data_dir RMS has not created yet
-    lives where its parent does). Free space is what RMS sees: f_bavail.
+    ``total_gb`` is what RMS can actually fill: used + available, i.e. the size minus
+    the blocks reserved for root (5% on ext4 by default — 373 GB of a 7.3 TB disk,
+    which a user process such as RMS gets ENOSPC on). Free space is what RMS sees:
+    f_bavail. Walks up to the nearest existing directory (a data_dir RMS has not
+    created yet lives where its parent does).
     """
     p = Path(path).expanduser()
     while not p.exists():
@@ -108,8 +111,10 @@ def disk_of(path: str) -> dict | None:
         st = os.statvfs(p)
     except OSError:
         return None
+    reserved = (st.f_bfree - st.f_bavail) * st.f_frsize
     return {"key": dev, "mount": str(mount),
-            "total_gb": st.f_blocks * st.f_frsize / GB, "free_gb": st.f_bavail * st.f_frsize / GB}
+            "total_gb": (st.f_blocks * st.f_frsize - reserved) / GB, "free_gb": st.f_bavail * st.f_frsize / GB,
+            "reserved_gb": reserved / GB}
 
 
 def _truthy(v) -> bool:
@@ -565,7 +570,8 @@ def sim_inputs(fleet, disk=disk_of) -> dict:
         key = d["key"] if d else ("?", s["data_dir"])
         g = groups.setdefault(key, {"mount": d["mount"] if d else None,
                                     "total_gb": d["total_gb"] if d else None,
-                                    "free_gb": d["free_gb"] if d else None, "stations": []})
+                                    "free_gb": d["free_gb"] if d else None,
+                                    "reserved_gb": d.get("reserved_gb", 0) if d else 0, "stations": []})
         g["stations"].append({
             "id": t.id, "data_dir": s["data_dir"], "settings": settings, "present": present,
             "night_hours": s["night_hours"], "ff_gb": s["ff_gb"], "camera_mbps": s["camera_mbps"],

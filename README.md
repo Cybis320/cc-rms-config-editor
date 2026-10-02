@@ -237,7 +237,9 @@ frames, frame times, logs, and how many capture sessions a night makes — is
 measured from the last few nights on disk, in the background (a cold disk takes
 a minute; results are cached in `~/.local/state/config-editor/measured.json`),
 and can be moved too. So can the number of stations and the disk size, to plan
-a new camera.
+a new camera. The disk size is what RMS can fill: used + available, without the
+blocks the filesystem reserves for root (5% on ext4 — RMS gets "No space left"
+there; planning on the full size once filled a disk).
 
 **Auto-tune** (optional) proposes every storage setting from simplified
 assumptions: all stations on the disk alike, the bitrate and sizes as set.
