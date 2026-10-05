@@ -120,20 +120,37 @@ class Fleet:
     known: set[str] | None = None          # every option ConfigReader.py reads
     template_path: Path | None = None      # <rms_dir>/.configTemplate
     template: ConfigFile | None = None
+    rms_dir: Path = DEFAULT_RMS_DIR
+    reader_mtime: float | None = None      # ConfigReader.py mtime when known/types were read
 
     @classmethod
     def load(cls, targets: list[Target], rms_dir: Path = DEFAULT_RMS_DIR) -> "Fleet":
-        fleet = cls(targets=targets, types=option_types(rms_dir),
-                    known=auditmod.known_options(rms_dir),
+        fleet = cls(targets=targets, rms_dir=rms_dir,
                     template_path=auditmod.template_path(rms_dir))
         fleet.reload()
         return fleet
 
+    def _reader_path(self) -> Path:
+        return Path(self.rms_dir).expanduser() / "RMS" / "ConfigReader.py"
+
     def reload(self) -> None:
+        # RMS gets updated while the editor runs: re-read what ConfigReader.py knows too
+        self.types = option_types(self.rms_dir)
+        self.known = auditmod.known_options(self.rms_dir)
+        try:
+            self.reader_mtime = self._reader_path().stat().st_mtime
+        except OSError:
+            self.reader_mtime = None
         self.files = {t.id: ConfigFile.load(t.path) for t in self.targets}
         self.template = ConfigFile.load(self.template_path) if self.template_path else None
 
     def changed_on_disk(self) -> bool:
+        try:
+            if self._reader_path().stat().st_mtime != self.reader_mtime:
+                return True
+        except OSError:
+            if self.reader_mtime is not None:
+                return True
         watched = [(t.path, self.files.get(t.id)) for t in self.targets]
         if self.template_path:
             watched.append((self.template_path, self.template))
