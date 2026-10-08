@@ -795,6 +795,19 @@ async function poll() {
   } catch (e) { setTimeout(poll, 5000); }
 }
 
+// The server exits once no page has been open for a while, and this page goes quiet
+// while you tune: tell it the page is still here.
+let offline = false;
+setInterval(async () => {
+  try {
+    if (!(await fetch('/api/alive', { cache: 'no-store' })).ok) return;
+    if (offline) { offline = false; $('mstatus').textContent = inputs?.disks.length ? measuredStatus() : ''; }
+  } catch (e) {
+    offline = true;
+    $('mstatus').textContent = 'server not running — click the editor icon to start it again';
+  }
+}, 60000);
+
 $('disk').onchange = () => { diskIdx = +$('disk').value; P = null; initParams(false); renderControls(); update(); $('mstatus').textContent = measuredStatus(); };
 $('reset').onclick = () => { T.said = null; T.live = false; T.capt_nights = null; initParams(false); renderControls(); update(); };
 $('apply').onclick = apply;

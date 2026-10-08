@@ -14,6 +14,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from . import audit as auditmod
 from . import storage
@@ -122,10 +123,13 @@ class Fleet:
     template: ConfigFile | None = None
     rms_dir: Path = DEFAULT_RMS_DIR
     reader_mtime: float | None = None      # ConfigReader.py mtime when known/types were read
+    # Re-runs discover() so stations added (or removed) while the editor runs show up
+    rescan: Callable[[], list[Target]] | None = None
 
     @classmethod
-    def load(cls, targets: list[Target], rms_dir: Path = DEFAULT_RMS_DIR) -> "Fleet":
-        fleet = cls(targets=targets, rms_dir=rms_dir,
+    def load(cls, targets: list[Target], rms_dir: Path = DEFAULT_RMS_DIR,
+             rescan: Callable[[], list[Target]] | None = None) -> "Fleet":
+        fleet = cls(targets=targets, rms_dir=rms_dir, rescan=rescan,
                     template_path=auditmod.template_path(rms_dir))
         fleet.reload()
         return fleet
@@ -134,6 +138,8 @@ class Fleet:
         return Path(self.rms_dir).expanduser() / "RMS" / "ConfigReader.py"
 
     def reload(self) -> None:
+        if self.rescan is not None:
+            self.targets = self.rescan() or self.targets
         # RMS gets updated while the editor runs: re-read what ConfigReader.py knows too
         self.types = option_types(self.rms_dir)
         self.known = auditmod.known_options(self.rms_dir)
@@ -145,6 +151,8 @@ class Fleet:
         self.template = ConfigFile.load(self.template_path) if self.template_path else None
 
     def changed_on_disk(self) -> bool:
+        if self.rescan is not None and self.rescan() not in ([], self.targets):
+            return True
         try:
             if self._reader_path().stat().st_mtime != self.reader_mtime:
                 return True

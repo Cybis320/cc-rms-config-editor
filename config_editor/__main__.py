@@ -26,10 +26,12 @@ def _add_location_args(p: argparse.ArgumentParser) -> None:
 
 
 def _load(args: argparse.Namespace) -> Fleet:
-    targets = discover(args.stations_dir, args.rms_dir, args.config, include_root=args.include_root)
+    def scan():
+        return discover(args.stations_dir, args.rms_dir, args.config, include_root=args.include_root)
+    targets = scan()
     if not targets:
         raise SystemExit("no .config found under %s or %s" % (args.stations_dir, args.rms_dir))
-    return Fleet.load(targets, args.rms_dir)
+    return Fleet.load(targets, args.rms_dir, rescan=scan)
 
 
 def _find(fleet: Fleet, name: str) -> tuple[str, str]:
@@ -197,7 +199,7 @@ def cmd_storage(args: argparse.Namespace) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     from .server import serve
-    serve(_load(args), args.host, args.port)
+    serve(_load(args), args.host, args.port, idle_s=args.idle_minutes * 60)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -211,6 +213,8 @@ def main(argv: list[str] | None = None) -> None:
     _add_location_args(p)
     p.add_argument("--host", default="127.0.0.1", help="bind address (0.0.0.0 for the LAN)")
     p.add_argument("--port", type=int, default=8421)
+    p.add_argument("--idle-minutes", type=float, default=10,
+                   help="stop after this many minutes with no editor page open (0: never; default: 10)")
     p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("list", help="print every option with its value per station")

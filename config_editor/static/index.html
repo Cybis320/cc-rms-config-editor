@@ -291,16 +291,24 @@ function renderChecks() {
 }
 
 // Poll for changes on disk; never yank the table out from under an open editor.
+// The polling is also what keeps the server up: it exits once no page has been open
+// for a while (--idle-minutes), and the next click on the icon starts it again.
+let offline = false;
 async function poll() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
     if (!r.ok) return;
     const fresh = await r.json();
-    const changed = fresh.files.some((f, i) => !files[i] || f.mtime !== files[i].mtime || f.path !== files[i].path);
+    if (offline) { offline = false; setStatus(); }
+    const changed = fresh.files.length !== files.length ||
+      fresh.files.some((f, i) => f.mtime !== files[i].mtime || f.path !== files[i].path);
     if (!changed) return;
     if (editing || panelMode) $('banner').classList.add('show');
     else applyState(fresh);
-  } catch (e) { /* keep the last view */ }
+  } catch (e) {   // keep the last view
+    offline = true;
+    $('status').textContent = 'server not running — click the editor icon to start it again';
+  }
 }
 
 async function apiSet(section, option, values, expect) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,12 +32,15 @@ class EditorHandler(BaseHTTPRequestHandler):
     # --- routing ---------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
+        self.server.last_seen = time.monotonic()
         path = urlparse(self.path).path
         try:
             if path == "/":
                 self._send_page()
             elif path == "/api/state":
                 self._send_state()
+            elif path == "/api/alive":
+                self._send_json(200, {})
             elif path == "/api/audit":
                 with self.lock:
                     if self.fleet.changed_on_disk():
@@ -63,6 +67,7 @@ class EditorHandler(BaseHTTPRequestHandler):
             self._send_error(500, "%s: %s" % (type(exc).__name__, exc))
 
     def do_POST(self) -> None:  # noqa: N802
+        self.server.last_seen = time.monotonic()
         path = urlparse(self.path).path
         try:
             if not self._same_origin():
@@ -211,19 +216,45 @@ class EditorHandler(BaseHTTPRequestHandler):
         pass
 
 
-def serve(fleet: Fleet, host: str, port: int) -> None:
+def _stop_when_idle(httpd: ThreadingHTTPServer, lock: threading.Lock, idle_s: float) -> None:
+    """Stop the server once no page has asked it anything for ``idle_s`` seconds.
+
+    An open page keeps polling (a hidden tab at least once a minute), so idle means
+    every editor tab is closed. Never mid-measurement; and the lock is taken so a
+    write in progress finishes and none starts after the server is gone.
+    """
+    while True:
+        time.sleep(min(60.0, idle_s / 4))
+        if time.monotonic() - httpd.last_seen < idle_s or storage.measuring():
+            continue
+        lock.acquire()
+        if time.monotonic() - httpd.last_seen < idle_s:
+            lock.release()
+            continue
+        print("%s no page open for %g min: stopped" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), idle_s / 60),
+              flush=True)
+        httpd.shutdown()
+        return
+
+
+def serve(fleet: Fleet, host: str, port: int, idle_s: float = 0) -> None:
+    """Serve the editor; with ``idle_s`` > 0, exit once no page has been open that long."""
+    lock = threading.Lock()
     handler = partial(
         EditorHandler,
         fleet=fleet,
-        lock=threading.Lock(),
+        lock=lock,
         backup_done=set(),
         version=code_version(REPO_DIR),
     )
     storage.measure_in_background(fleet)   # warm the Storage page's per-night sizes
     httpd = ThreadingHTTPServer((host, port), handler)
+    httpd.last_seen = time.monotonic()
     shown = host if host not in ("0.0.0.0", "") else "localhost"
     print("Config editor: http://%s:%d" % (shown, port))
     print("Editing %d config(s): %s" % (len(fleet.targets), ", ".join(t.id for t in fleet.targets)))
+    if idle_s > 0:
+        threading.Thread(target=_stop_when_idle, args=(httpd, lock, idle_s), daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

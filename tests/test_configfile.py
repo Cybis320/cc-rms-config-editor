@@ -187,6 +187,23 @@ def test_discover_shared_base_first(tmp_path):
     assert [(t.id, t.shared) for t in targets] == [("shared", True), ("XX0001", False), ("XX0002", False)]
 
 
+def test_reload_picks_up_stations_added_and_removed(tmp_path):
+    root = make_stations(tmp_path, n=2)
+    scan = lambda: discover(root, tmp_path / "no-rms")
+    fleet = Fleet.load(scan(), tmp_path / "no-rms", rescan=scan)
+    assert not fleet.changed_on_disk()
+    (root / "XX0009").mkdir()
+    (root / "XX0009" / ".config").write_text(SAMPLE.replace("XX0001", "XX0009"))
+    assert fleet.changed_on_disk()
+    fleet.reload()
+    assert [f["id"] for f in fleet.matrix()["files"]] == ["XX0001", "XX0002", "XX0009"]
+    assert not fleet.changed_on_disk()
+    (root / "XX0002" / ".config").unlink()
+    assert fleet.changed_on_disk()
+    fleet.reload()
+    assert [t.id for t in fleet.targets] == ["XX0001", "XX0009"]
+
+
 def test_apply_writes_subset_and_backs_up_once_per_session(tmp_path):
     root = make_stations(tmp_path)
     fleet = Fleet.load(discover(root, tmp_path / "no-rms"), tmp_path / "no-rms")

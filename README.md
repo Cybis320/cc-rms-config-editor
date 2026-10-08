@@ -43,6 +43,10 @@ update takes effect immediately, and a desktop notification says so. Set
 `CC_NO_SELFUPDATE=1` to skip it. A checkout with local commits or edits is never
 touched. The running version is shown top-right in the page.
 
+The server stops by itself once no editor page has been open for 10 minutes
+(`--idle-minutes`), so the next click starts a fresh one. An open tab keeps it
+up, even in the background.
+
 ## Desktop icon
 
 ```bash
@@ -67,7 +71,8 @@ Then open <http://localhost:8421>. Pure stdlib, no dependencies.
 | --- | --- | --- |
 | `--host` | `127.0.0.1` | Use `0.0.0.0` to reach it from another machine on the LAN |
 | `--port` | `8421` | |
-| `--stations-dir` | `~/source/Stations` | One column per `<dir>/*/.config` |
+| `--idle-minutes` | `10` | Stop once no editor page has been open this long (`0`: never) |
+| `--stations-dir` | `~/source/Stations` | One column per `<dir>/*/.config`; stations added while the editor runs appear on the next refresh |
 | `--rms-dir` | `~/source/RMS` | Its `.config` is used when there are no station folders; its `.configTemplate` and `ConfigReader.py` drive the template column, audit and migration |
 | `--config PATH` | | Show an extra `.config` as its own column (repeatable) |
 
