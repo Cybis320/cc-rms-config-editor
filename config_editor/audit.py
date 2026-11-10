@@ -92,7 +92,8 @@ def audit(station: ConfigFile, template: ConfigFile | None, known: set[str] | No
     for (sec, key), e in station.entries.items():
         if known is not None and key not in known:
             out["unknown"].append({"section": sec, "name": e.option, "key": key, "value": e.value})
-        elif template is not None and (sec, key) not in template.entries:
+        elif (template is not None and (sec, key) not in template.entries
+              and (sec, key) not in template.disabled):   # template shows it commented out
             out["extra"].append({"section": sec, "name": e.option, "key": key, "value": e.value})
     trusted = set()
     if known:

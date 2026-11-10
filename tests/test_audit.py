@@ -86,6 +86,15 @@ def test_audit(files):
     assert [(d["section"], d["key"], d["value"]) for d in a["disabled"]] == [("System", "star_gate_factor", "3.0")]
 
 
+def test_audit_active_option_the_template_has_commented_out_is_not_extra(tmp_path):
+    t = tmp_path / ".configTemplate"
+    t.write_text("[Capture]\n; raw_video_bitrate_mbps: 8\n")
+    s = tmp_path / ".config"
+    s.write_text("[Capture]\nraw_video_bitrate_mbps: 12\n")
+    a = audit(ConfigFile.load(s), ConfigFile.load(t), {"raw_video_bitrate_mbps"})
+    assert a["extra"] == [] and a["unknown"] == [] and a["missing"] == []
+
+
 def test_audit_without_reader_or_template(files):
     station, template = files
     a = audit(station, None, None)
